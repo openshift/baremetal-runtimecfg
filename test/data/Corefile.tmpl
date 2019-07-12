@@ -1,0 +1,12 @@
+. {
+    errors
+    health
+    mdns {{.Cluster.Domain}} 0 {{.Cluster.Name}}
+    forward . /etc/coredns/resolv.conf
+    cache 30
+    reload
+    hosts /etc/coredns/api-int.hosts {{.Cluster.Domain}} {
+        {{.Cluster.APIVIP}} api-int.{{.Cluster.Domain}}
+        fallthrough
+    }
+}
