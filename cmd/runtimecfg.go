@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
-	"text/template"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
+	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 )
 
 func main() {
@@ -51,7 +50,8 @@ func main() {
 	}
 
 	var renderCmd = &cobra.Command{
-		Use:   "render [path to kubeconfig] [files to render]...",
+		Use: `render [path to kubeconfig] [paths to render]...
+		        If there is one single path and it is a directory, it renders the .tmpl files in it`,
 		Short: "Renders go templates with the runtime configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kubeCfgPath := "./kubeconfig"
@@ -88,33 +88,7 @@ func main() {
 				return err
 			}
 
-			ext := ".tmpl"
-			extLen := len(ext)
-			for _, templatePath := range args[1:] {
-				if path.Ext(templatePath) != ext {
-					return fmt.Errorf("Template %s does not have the right extension. Must be '%s'", templatePath, ext)
-				}
-
-				tmpl, err := template.ParseFiles(templatePath)
-				if err != nil {
-					return err
-				}
-
-				baseName := path.Base(templatePath)
-				outPath := path.Join(outDir, baseName[:len(baseName)-extLen])
-				outFile, err := os.Create(outPath)
-				if err != nil {
-					return err
-				}
-				defer outFile.Close()
-
-				fmt.Printf("Rendering %s\n", outPath)
-				err = tmpl.Execute(outFile, config)
-				if err != nil {
-					return err
-				}
-			}
-			return err
+			return render.Render(outDir, args[1:], config)
 		},
 	}
 	renderCmd.Flags().StringP("out-dir", "o", "", "Directory where the templates will be rendered")
