@@ -45,7 +45,7 @@ vrrp_instance {{.Cluster.Name}}_INGRESS {
         auth_pass cluster_uuid_ingress_vip
     }
     virtual_ipaddress {
-        {{.Cluster.IngressVIP}}/{{Cluster.VIPNetmask}}
+        {{.Cluster.IngressVIP}}/{{.Cluster.VIPNetmask}}
     }
     track_script {
         chk_ingress
