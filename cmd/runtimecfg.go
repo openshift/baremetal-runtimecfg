@@ -88,10 +88,20 @@ func main() {
 				return err
 			}
 
-			return render.Render(outDir, args[1:], config)
+			leftDelim, err := cmd.Flags().GetString("left-delimiter")
+			if err != nil {
+				return err
+			}
+			rightDelim, err := cmd.Flags().GetString("right-delimiter")
+			if err != nil {
+				return err
+			}
+			return render.Render(outDir, args[1:], config, leftDelim, rightDelim)
 		},
 	}
 	renderCmd.Flags().StringP("out-dir", "o", "", "Directory where the templates will be rendered")
+	renderCmd.Flags().String("left-delimiter", "", "String to be used as left delimiter for variables in the templates")
+	renderCmd.Flags().String("right-delimiter", "", "String to be used as right delimiter for variables in the templates")
 
 	rootCmd.PersistentFlags().Bool("verbose", false, "Display extra information about the rendering")
 	rootCmd.PersistentFlags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
