@@ -1,6 +1,11 @@
 package utils
 
 import (
+	"crypto/tls"
+	"fmt"
+	"io/ioutil"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -22,4 +27,39 @@ func ShortHostname() (shortName string, err error) {
 	splitHostname := strings.SplitN(hostname, ".", 2)
 	shortName = splitHostname[0]
 	return shortName, err
+}
+
+func GetEtcdSRVMembers(domain string) (srvs []*net.SRV, err error) {
+	_, srvs, err = net.LookupSRV("etcd-server-ssl", "tcp", domain)
+	if err != nil {
+		return srvs, err
+	}
+	return srvs, err
+}
+
+func GetFirstAddr(host string) (string, error) {
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return "", err
+	}
+	return addrs[0], nil
+}
+
+func IsKubernetesHealthy(port uint16) (bool, error) {
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(fmt.Sprintf("https://127.0.0.1:%d/healthz", port))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	return string(body) == "ok", nil
 }
