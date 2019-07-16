@@ -3,7 +3,9 @@ module github.com/openshift/baremetal-runtimecfg
 go 1.12
 
 require (
+	github.com/coreos/go-iptables v0.4.1
 	github.com/davecgh/go-spew v1.1.1
+	github.com/google/go-cmp v0.3.0
 	github.com/imdario/mergo v0.3.7 // indirect
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v0.0.5

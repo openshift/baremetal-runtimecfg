@@ -29,23 +29,31 @@ type Node struct {
 	VRRPInterface string
 }
 
-func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP) (node Node, err error) {
+func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain string, err error) {
 	kubeCfg, err := clientcmd.LoadFromFile(kubeconfigPath)
 	if err != nil {
-		return node, err
+		return "", "", err
 	}
-
 	ctxt := kubeCfg.Contexts[kubeCfg.CurrentContext]
 	cluster := kubeCfg.Clusters[ctxt.Cluster]
 	serverUrl, err := url.Parse(cluster.Server)
 	if err != nil {
-		return node, err
+		return "", "", err
 	}
 
 	apiHostname := serverUrl.Hostname()
 	apiHostnameSlices := strings.SplitN(apiHostname, ".", 3)
-	node.Cluster.Name = apiHostnameSlices[1]
-	node.Cluster.Domain = apiHostnameSlices[2]
+
+	return apiHostnameSlices[1], apiHostnameSlices[2], nil
+}
+
+func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP) (node Node, err error) {
+	clusterName, clusterDomain, err := GetKubeconfigClusterNameAndDomain(kubeconfigPath)
+	if err != nil {
+		return node, err
+	}
+	node.Cluster.Name = clusterName
+	node.Cluster.Domain = clusterDomain
 
 	node.Cluster.APIVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-api")
 	node.Cluster.DNSVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-dns")

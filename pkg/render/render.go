@@ -18,7 +18,7 @@ var extLen = len(ext)
 
 var log = logrus.New()
 
-func renderFile(outDir string, templatePath string, cfg config.Node) error {
+func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	tmpl, err := template.ParseFiles(templatePath)
 	if err != nil {
 		log.WithFields(logrus.Fields{
@@ -27,21 +27,19 @@ func renderFile(outDir string, templatePath string, cfg config.Node) error {
 		return err
 	}
 
-	baseName := path.Base(templatePath)
-	outPath := path.Join(outDir, baseName[:len(baseName)-extLen])
-	outFile, err := os.Create(outPath)
+	renderFile, err := os.Create(renderPath)
 	if err != nil {
 		log.WithFields(logrus.Fields{
-			"path": outPath,
+			"path": renderPath,
 		}).Error("Failed to create file")
 		return err
 	}
-	defer outFile.Close()
+	defer renderFile.Close()
 
 	log.WithFields(logrus.Fields{
-		"path": outPath,
+		"path": renderPath,
 	}).Info("Runtimecfg rendering template")
-	return tmpl.Execute(outFile, cfg)
+	return tmpl.Execute(renderFile, cfg)
 }
 
 func Render(outDir string, paths []string, cfg config.Node) error {
@@ -77,7 +75,9 @@ func Render(outDir string, paths []string, cfg config.Node) error {
 			return fmt.Errorf("Template %s does not have the right extension. Must be '%s'", templatePath, ext)
 		}
 
-		err := renderFile(outDir, templatePath, cfg)
+		baseName := path.Base(templatePath)
+		renderPath := path.Join(outDir, baseName[:len(baseName)-extLen])
+		err := RenderFile(renderPath, templatePath, cfg)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"path": templatePath,
