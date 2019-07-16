@@ -25,6 +25,7 @@ type Backend struct {
 	Address string
 	Port    uint16
 }
+
 type ApiLBConfig struct {
 	ApiPort  uint16
 	LbPort   uint16
@@ -32,10 +33,18 @@ type ApiLBConfig struct {
 	Backends []Backend
 }
 
+type RuntimeConfig struct {
+	LBConfig *ApiLBConfig
+}
+
 func getSortedBackends(domain string) (backends []Backend, err error) {
 	srvs, err := utils.GetEtcdSRVMembers(domain)
 	if err != nil {
-		return backends, err
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Info("Failed to get Etcd SRV members")
+		srvs = []*net.SRV{}
+		err = nil
 	}
 
 	backends = make([]Backend, len(srvs))
@@ -55,6 +64,31 @@ func getSortedBackends(domain string) (backends []Backend, err error) {
 		return backends[i].Address < backends[j].Address
 	})
 	return backends, err
+}
+
+func GetLBConfig(domain string, apiPort, lbPort, statPort uint16) (ApiLBConfig, error) {
+	config := ApiLBConfig{
+		ApiPort:  apiPort,
+		LbPort:   lbPort,
+		StatPort: statPort,
+	}
+	backends, err := getSortedBackends(domain)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"domain": domain,
+		}).Error("Failed to retrieve API member information")
+		return config, err
+	}
+
+	// The backends port is the Etcd one, but we need to loadbalance the API one
+	for i := 0; i < len(backends); i++ {
+		backends[i].Port = apiPort
+	}
+	config.Backends = backends
+	log.WithFields(logrus.Fields{
+		"config": config,
+	}).Debug("Config for LB configuration retrieved")
+	return config, nil
 }
 
 func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, apiPort, lbPort, statPort uint16, interval time.Duration) error {
@@ -82,34 +116,16 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 		case <-done:
 			return nil
 		default:
-			newConfig = &ApiLBConfig{
-				ApiPort:  apiPort,
-				LbPort:   lbPort,
-				StatPort: statPort,
-			}
-
-			backends, err := getSortedBackends(domain)
-
-			// The backends port is the Etcd one, but we need the API one
-			for i := 0; i < len(backends); i++ {
-				backends[i].Port = apiPort
-			}
+			config, err := GetLBConfig(domain, apiPort, lbPort, statPort)
 			if err != nil {
-				log.WithFields(logrus.Fields{
-					"domain": domain,
-				}).Error("Failed to get API member information")
 				return err
 			}
-			newConfig.Backends = backends
-			log.WithFields(logrus.Fields{
-				"config": *newConfig,
-			}).Debug("Config for LB configuration retrieved")
-
+			newConfig = &config
 			if oldConfig == nil || !cmp.Equal(*oldConfig, *newConfig) {
 				log.WithFields(logrus.Fields{
 					"newConfig": *newConfig,
 				}).Info("Config change detected")
-				err = render.RenderFile(cfgPath, templatePath, newConfig)
+				err = render.RenderFile(cfgPath, templatePath, RuntimeConfig{LBConfig: newConfig})
 				if err != nil {
 					log.WithFields(logrus.Fields{
 						"config": *newConfig,

@@ -1,12 +1,14 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
 
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/openshift/baremetal-runtimecfg/pkg/monitor"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
@@ -24,6 +26,7 @@ type Cluster struct {
 
 type Node struct {
 	Cluster       Cluster
+	LBConfig      monitor.ApiLBConfig
 	NonVirtualIP  string
 	ShortHostname string
 	VRRPInterface string
@@ -47,7 +50,7 @@ func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain stri
 	return apiHostnameSlices[1], apiHostnameSlices[2], nil
 }
 
-func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP) (node Node, err error) {
+func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	clusterName, clusterDomain, err := GetKubeconfigClusterNameAndDomain(kubeconfigPath)
 	if err != nil {
 		return node, err
@@ -86,6 +89,12 @@ func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip n
 	prefix, _ := nonVipAddr.Mask.Size()
 	node.Cluster.VIPNetmask = prefix
 	node.VRRPInterface = vipIface.Name
+
+	domain := fmt.Sprintf("%s.%s", clusterName, clusterDomain)
+	node.LBConfig, err = monitor.GetLBConfig(domain, apiPort, lbPort, statPort)
+	if err != nil {
+		return node, err
+	}
 
 	return node, err
 }

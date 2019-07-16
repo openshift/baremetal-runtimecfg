@@ -8,8 +8,6 @@ import (
 	"text/template"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 )
 
 const ext = ".tmpl"
@@ -42,7 +40,7 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	return tmpl.Execute(renderFile, cfg)
 }
 
-func Render(outDir string, paths []string, cfg config.Node) error {
+func Render(outDir string, paths []string, cfg interface{}) error {
 	tempPaths := paths
 	if len(paths) == 1 {
 		fi, err := os.Stat(paths[0])
@@ -81,6 +79,7 @@ func Render(outDir string, paths []string, cfg config.Node) error {
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"path": templatePath,
+				"err":  err,
 			}).Error("Failed to render template")
 		}
 	}
