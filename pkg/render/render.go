@@ -7,6 +7,7 @@ import (
 	"path"
 	"text/template"
 
+	"github.com/Masterminds/sprig"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,7 +18,8 @@ var extLen = len(ext)
 var log = logrus.New()
 
 func RenderFile(renderPath, templatePath string, cfg interface{}) error {
-	tmpl, err := template.ParseFiles(templatePath)
+	funcs := sprig.TxtFuncMap()
+	tmpl, err := template.New(templatePath).Funcs(funcs).ParseFiles(templatePath)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"path": templatePath,
