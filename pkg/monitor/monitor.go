@@ -145,7 +145,10 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 			ok, err := utils.IsKubernetesHealthy(lbPort)
 			if err == nil && ok {
 				log.Info("API reachable through HAProxy")
-				ensureHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
+				err := ensureHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
+				if err != nil {
+					log.WithFields(logrus.Fields{"err": err}).Error("Failed to ensure HAProxy PREROUTING rule to direct traffic to the LB")
+				}
 			} else {
 				log.Info("API still not reachable through HAProxy")
 			}
