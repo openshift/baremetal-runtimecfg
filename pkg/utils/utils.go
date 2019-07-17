@@ -29,6 +29,18 @@ func ShortHostname() (shortName string, err error) {
 	return shortName, err
 }
 
+func EtcdShortHostname() (shortName string, err error) {
+	shortHostname, err := ShortHostname()
+	if err != nil {
+		panic(err)
+	}
+	if !strings.Contains(shortHostname, "master") {
+		return "", err
+	}
+	etcdHostname := strings.Replace(shortHostname, "master", "etcd", 1)
+	return etcdHostname, err
+}
+
 func GetEtcdSRVMembers(domain string) (srvs []*net.SRV, err error) {
 	_, srvs, err = net.LookupSRV("etcd-server-ssl", "tcp", domain)
 	if err != nil {

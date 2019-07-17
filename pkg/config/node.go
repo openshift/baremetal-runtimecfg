@@ -25,11 +25,12 @@ type Cluster struct {
 }
 
 type Node struct {
-	Cluster       Cluster
-	LBConfig      monitor.ApiLBConfig
-	NonVirtualIP  string
-	ShortHostname string
-	VRRPInterface string
+	Cluster           Cluster
+	LBConfig          monitor.ApiLBConfig
+	NonVirtualIP      string
+	ShortHostname     string
+	EtcdShortHostname string
+	VRRPInterface     string
 }
 
 func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain string, err error) {
@@ -64,6 +65,11 @@ func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip n
 
 	// Node
 	node.ShortHostname, err = utils.ShortHostname()
+	if err != nil {
+		return node, err
+	}
+
+	node.EtcdShortHostname, err = utils.EtcdShortHostname()
 	if err != nil {
 		return node, err
 	}
