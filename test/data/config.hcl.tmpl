@@ -9,3 +9,12 @@ service {
     port = 42424
     ttl = 3200
 }
+
+service {
+    name = "{{`{{.Cluster.Name}}`}} Etcd"
+    host_name = "{{.EtcdShortHostname}}.local."
+    type = "_etcd-server-ssl._tcp"
+    domain = "local."
+    port = 2380
+    ttl = 3200
+}
