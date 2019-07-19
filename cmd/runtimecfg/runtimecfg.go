@@ -51,7 +51,12 @@ func main() {
 			if err != nil {
 				return err
 			}
-			config, err := config.GetConfig(kubeCfgPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+			clusterConfigPath, err := cmd.Flags().GetString("cluster-config")
+			if err != nil {
+				return err
+			}
+
+			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
 			if err != nil {
 				return err
 			}
@@ -95,7 +100,11 @@ func main() {
 			if err != nil {
 				return err
 			}
-			config, err := config.GetConfig(kubeCfgPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+			clusterConfigPath, err := cmd.Flags().GetString("cluster-config")
+			if err != nil {
+				return err
+			}
+			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
 			if err != nil {
 				return err
 			}
@@ -117,6 +126,7 @@ func main() {
 	}
 	renderCmd.Flags().StringP("out-dir", "o", "", "Directory where the templates will be rendered")
 
+	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
 	rootCmd.PersistentFlags().Bool("verbose", false, "Display extra information about the rendering")
 	rootCmd.PersistentFlags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
 	rootCmd.PersistentFlags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")

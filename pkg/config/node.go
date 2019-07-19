@@ -3,15 +3,19 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
 	"strings"
 
+	"github.com/ghodss/yaml"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/monitor"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
+	"github.com/openshift/installer/pkg/types"
 )
 
 type Cluster struct {
@@ -24,6 +28,7 @@ type Cluster struct {
 	IngressVIP             string
 	IngressVirtualRouterID uint8
 	VIPNetmask             int
+	MasterAmount           int64
 }
 
 type Node struct {
@@ -85,7 +90,28 @@ func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain stri
 	return apiHostnameSlices[1], apiHostnameSlices[2], nil
 }
 
-func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func getClusterConfigMasterAmount(configPath string) (amount *int64, err error) {
+	yamlFile, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		return amount, err
+	}
+
+	cm := v1.ConfigMap{}
+	err = yaml.Unmarshal(yamlFile, &cm)
+	if err != nil {
+		return amount, err
+	}
+
+	ic := types.InstallConfig{}
+	err = yaml.Unmarshal([]byte(cm.Data["install-config"]), &ic)
+	if err != nil {
+		return amount, err
+	}
+
+	return ic.ControlPlane.Replicas, nil
+}
+
+func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	clusterName, clusterDomain, err := GetKubeconfigClusterNameAndDomain(kubeconfigPath)
 	if err != nil {
 		return node, err
@@ -96,6 +122,15 @@ func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip n
 	node.Cluster.APIVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-api")
 	node.Cluster.DNSVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-dns")
 	node.Cluster.IngressVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-ingress")
+
+	if clusterConfigPath != "" {
+		masterAmount, err := getClusterConfigMasterAmount(clusterConfigPath)
+		if err != nil {
+			return node, err
+		}
+
+		node.Cluster.MasterAmount = *masterAmount
+	}
 
 	// Node
 	node.ShortHostname, err = utils.ShortHostname()
