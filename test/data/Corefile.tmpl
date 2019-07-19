@@ -2,7 +2,7 @@
     errors
     health
     mdns {{.Cluster.Domain}} 0 {{.Cluster.Name}}
-    forward . /etc/coredns/resolv.conf
+    forward . {{- range $upstream := .DNSUpstreams}} {{$upstream}}{{- end}}
     cache 30
     reload
     hosts /etc/coredns/api-int.hosts {{.Cluster.Domain}} {
