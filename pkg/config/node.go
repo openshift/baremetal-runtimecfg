@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +33,38 @@ type Node struct {
 	ShortHostname     string
 	EtcdShortHostname string
 	VRRPInterface     string
+	DNSUpstreams      []string
+}
+
+func getDNSUpstreams() (upstreams []string, err error) {
+	dnsFile, err := os.Open("/etc/resolv.conf")
+	if err != nil {
+		return upstreams, err
+	}
+	defer dnsFile.Close()
+
+	scanner := bufio.NewScanner(dnsFile)
+
+	// Scanner's default SplitFunc is bufio.ScanLines
+	upstreams = make([]string, 0)
+	for scanner.Scan() {
+		line := string(scanner.Text())
+		fields := strings.Fields(line)
+		if len(fields) < 1 {
+			continue
+		}
+		switch fields[0] {
+		case "nameserver":
+			// CoreDNS forward plugin takes up to 15 upstream servers
+			if len(fields) > 1 && len(upstreams) < 15 {
+			}
+			upstreams = append(upstreams, fields[1])
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return upstreams, err
+	}
+	return upstreams, nil
 }
 
 func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain string, err error) {
@@ -92,6 +126,19 @@ func GetConfig(kubeconfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip n
 		return node, err
 	}
 	node.NonVirtualIP = nonVipAddr.IP.String()
+
+	resolvConfUpstreams, err := getDNSUpstreams()
+	if err != nil {
+		return node, err
+	}
+	// Filter out our potential CoreDNS addresses from upstream servers
+	node.DNSUpstreams = make([]string, 0)
+	for _, upstream := range resolvConfUpstreams {
+		if upstream != node.NonVirtualIP && upstream != node.Cluster.DNSVIP && upstream != "127.0.0.1" {
+			node.DNSUpstreams = append(node.DNSUpstreams, upstream)
+		}
+	}
+
 	prefix, _ := nonVipAddr.Mask.Size()
 	node.Cluster.VIPNetmask = prefix
 	node.VRRPInterface = vipIface.Name
