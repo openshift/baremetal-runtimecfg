@@ -1,7 +1,7 @@
 . {
     errors
     health
-    mdns {{.Cluster.Domain}} 0 {{.Cluster.Name}}
+    mdns {{.Cluster.Domain}} {{.Cluster.MasterAmount}} {{.Cluster.Name}}
     forward . {{- range $upstream := .DNSUpstreams}} {{$upstream}}{{- end}}
     cache 30
     reload
