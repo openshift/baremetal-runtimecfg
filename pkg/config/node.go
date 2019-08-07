@@ -90,20 +90,17 @@ func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain stri
 	return apiHostnameSlices[1], apiHostnameSlices[2], nil
 }
 
+func getClusterConfigClusterNameAndDomain(configPath string) (name, domain string, err error) {
+	ic, err := getClusterConfigMapInstallConfig(configPath)
+	if err != nil {
+		return name, domain, err
+	}
+
+	return ic.ObjectMeta.Name, ic.BaseDomain, nil
+}
+
 func getClusterConfigMasterAmount(configPath string) (amount *int64, err error) {
-	yamlFile, err := ioutil.ReadFile(configPath)
-	if err != nil {
-		return amount, err
-	}
-
-	cm := v1.ConfigMap{}
-	err = yaml.Unmarshal(yamlFile, &cm)
-	if err != nil {
-		return amount, err
-	}
-
-	ic := types.InstallConfig{}
-	err = yaml.Unmarshal([]byte(cm.Data["install-config"]), &ic)
+	ic, err := getClusterConfigMapInstallConfig(configPath)
 	if err != nil {
 		return amount, err
 	}
@@ -111,10 +108,33 @@ func getClusterConfigMasterAmount(configPath string) (amount *int64, err error) 
 	return ic.ControlPlane.Replicas, nil
 }
 
-func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
-	clusterName, clusterDomain, err := GetKubeconfigClusterNameAndDomain(kubeconfigPath)
+func getClusterConfigMapInstallConfig(configPath string) (installConfig types.InstallConfig, err error) {
+	yamlFile, err := ioutil.ReadFile(configPath)
 	if err != nil {
-		return node, err
+		return installConfig, err
+	}
+
+	cm := v1.ConfigMap{}
+	err = yaml.Unmarshal(yamlFile, &cm)
+	if err != nil {
+		return installConfig, err
+	}
+
+	ic := types.InstallConfig{}
+	err = yaml.Unmarshal([]byte(cm.Data["install-config"]), &ic)
+
+	return ic, err
+}
+
+func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+	// Try cluster-config.yml first
+	clusterName, clusterDomain, err := getClusterConfigClusterNameAndDomain(clusterConfigPath)
+	if err != nil {
+		// We are using kubeconfig as a fallback for this
+		clusterName, clusterDomain, err = GetKubeconfigClusterNameAndDomain(kubeconfigPath)
+		if err != nil {
+			return node, err
+		}
 	}
 	node.Cluster.Name = clusterName
 	node.Cluster.Domain = clusterDomain
