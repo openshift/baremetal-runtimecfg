@@ -93,6 +93,7 @@ func GetLBConfig(domain string, apiPort, lbPort, statPort uint16) (ApiLBConfig, 
 
 func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, apiPort, lbPort, statPort uint16, interval time.Duration) error {
 	var oldConfig, newConfig *ApiLBConfig
+	var k8sIsHealthy bool = false
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 
@@ -111,6 +112,7 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 	defer conn.Close()
 
 	domain := fmt.Sprintf("%s.%s", clusterName, clusterDomain)
+	log.Info("API is not reachable through HAProxy")
 	for {
 		select {
 		case <-done:
@@ -144,16 +146,21 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 
 			ok, err := utils.IsKubernetesHealthy(lbPort)
 			if err == nil && ok {
-				log.Info("API reachable through HAProxy")
+				if ! k8sIsHealthy {
+					log.Info("API is reachable through HAProxy")
+					k8sIsHealthy = true
+				}
 				err := ensureHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
 				if err != nil {
 					log.WithFields(logrus.Fields{"err": err}).Error("Failed to ensure HAProxy PREROUTING rule to direct traffic to the LB")
 				}
 			} else {
-				log.Info("API still not reachable through HAProxy")
+				cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
+				if k8sIsHealthy {
+					log.Info("API is not reachable through HAProxy")
+					k8sIsHealthy = false
+				}
 			}
-
-			log.Infof("Waiting %.0f seconds to check again", interval.Seconds())
 			time.Sleep(interval)
 		}
 	}
