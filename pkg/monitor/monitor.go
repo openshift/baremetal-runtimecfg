@@ -47,8 +47,7 @@ func getSortedBackends(domain string) (backends []Backend, err error) {
 		err = nil
 	}
 
-	backends = make([]Backend, len(srvs))
-	for i, srv := range srvs {
+	for _, srv := range srvs {
 		addr, err := utils.GetFirstAddr(srv.Target)
 		if err != nil {
 			log.WithFields(logrus.Fields{
@@ -56,9 +55,7 @@ func getSortedBackends(domain string) (backends []Backend, err error) {
 			}).Error("Failed to get address for member")
 			continue
 		}
-		backends[i].Host = srv.Target
-		backends[i].Address = addr
-		backends[i].Port = srv.Port
+		backends = append(backends, Backend{Host: srv.Target, Address: addr, Port: srv.Port})
 	}
 	sort.Slice(backends, func(i, j int) bool {
 		return backends[i].Address < backends[j].Address
@@ -146,7 +143,7 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 
 			ok, err := utils.IsKubernetesHealthy(lbPort)
 			if err == nil && ok {
-				if ! k8sIsHealthy {
+				if !k8sIsHealthy {
 					log.Info("API is reachable through HAProxy")
 					k8sIsHealthy = true
 				}
