@@ -75,3 +75,24 @@ func IsKubernetesHealthy(port uint16) (bool, error) {
 
 	return string(body) == "ok", nil
 }
+
+func AlarmStabilization(cur_alrm bool, cur_defect bool, consecutive_ctr uint8, on_threshold uint8, off_threshold uint8) (bool, uint8) {
+	var new_alrm bool = cur_alrm
+	var threshold uint8
+
+	if cur_alrm != cur_defect {
+		consecutive_ctr++
+		if cur_alrm {
+			threshold = off_threshold
+		} else {
+			threshold = on_threshold
+		}
+		if consecutive_ctr >= threshold {
+			new_alrm = !cur_alrm
+			consecutive_ctr = 0
+		}
+	} else {
+		consecutive_ctr = 0
+	}
+	return new_alrm, consecutive_ctr
+}
