@@ -7,16 +7,19 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/ghodss/yaml"
+	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/openshift/baremetal-runtimecfg/pkg/monitor"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"github.com/openshift/installer/pkg/types"
 )
+
+var log = logrus.New()
 
 type Cluster struct {
 	Name                   string
@@ -31,9 +34,22 @@ type Cluster struct {
 	MasterAmount           int64
 }
 
+type Backend struct {
+	Host    string
+	Address string
+	Port    uint16
+}
+
+type ApiLBConfig struct {
+	ApiPort  uint16
+	LbPort   uint16
+	StatPort uint16
+	Backends []Backend
+}
+
 type Node struct {
 	Cluster           Cluster
-	LBConfig          monitor.ApiLBConfig
+	LBConfig          ApiLBConfig
 	NonVirtualIP      string
 	ShortHostname     string
 	EtcdShortHostname string
@@ -199,10 +215,61 @@ func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressV
 	node.VRRPInterface = vipIface.Name
 
 	domain := fmt.Sprintf("%s.%s", clusterName, clusterDomain)
-	node.LBConfig, err = monitor.GetLBConfig(domain, apiPort, lbPort, statPort)
+	node.LBConfig, err = GetLBConfig(domain, apiPort, lbPort, statPort)
 	if err != nil {
 		return node, err
 	}
 
 	return node, err
+}
+
+func getSortedBackends(domain string) (backends []Backend, err error) {
+	srvs, err := utils.GetEtcdSRVMembers(domain)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Info("Failed to get Etcd SRV members")
+		srvs = []*net.SRV{}
+		err = nil
+	}
+
+	for _, srv := range srvs {
+		addr, err := utils.GetFirstAddr(srv.Target)
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"member": srv.Target,
+			}).Error("Failed to get address for member")
+			continue
+		}
+		backends = append(backends, Backend{Host: srv.Target, Address: addr, Port: srv.Port})
+	}
+	sort.Slice(backends, func(i, j int) bool {
+		return backends[i].Address < backends[j].Address
+	})
+	return backends, err
+}
+
+func GetLBConfig(domain string, apiPort, lbPort, statPort uint16) (ApiLBConfig, error) {
+	config := ApiLBConfig{
+		ApiPort:  apiPort,
+		LbPort:   lbPort,
+		StatPort: statPort,
+	}
+	backends, err := getSortedBackends(domain)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"domain": domain,
+		}).Error("Failed to retrieve API member information")
+		return config, err
+	}
+
+	// The backends port is the Etcd one, but we need to loadbalance the API one
+	for i := 0; i < len(backends); i++ {
+		backends[i].Port = apiPort
+	}
+	config.Backends = backends
+	log.WithFields(logrus.Fields{
+		"config": config,
+	}).Debug("Config for LB configuration retrieved")
+	return config, nil
 }
