@@ -11,7 +11,7 @@ service {
 }
 
 service {
-    name = "{{`{{.Cluster.Name}}`}} Etcd"
+    name = "{{.Cluster.Name}} Etcd"
     host_name = "{{.EtcdShortHostname}}.local."
     type = "_etcd-server-ssl._tcp"
     domain = "local."
