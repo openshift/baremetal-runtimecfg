@@ -159,9 +159,15 @@ func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressV
 	// keepalived. This is safe because fletcher8 can never return 255 due to
 	// the modulo arithmetic that happens. The largest value it can return is
 	// 238 (0xEE).
-	node.Cluster.APIVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-api") + 1
-	node.Cluster.DNSVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-dns") + 1
-	node.Cluster.IngressVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name + "-ingress") + 1
+	node.Cluster.APIVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-api") + 1
+	node.Cluster.DNSVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-dns") + 1
+	if node.Cluster.DNSVirtualRouterID == node.Cluster.APIVirtualRouterID {
+		node.Cluster.DNSVirtualRouterID++
+	}
+	node.Cluster.IngressVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-ingress") + 1
+	for node.Cluster.IngressVirtualRouterID == node.Cluster.DNSVirtualRouterID || node.Cluster.IngressVirtualRouterID == node.Cluster.APIVirtualRouterID {
+		node.Cluster.IngressVirtualRouterID++
+	}
 
 	if clusterConfigPath != "" {
 		masterAmount, err := getClusterConfigMasterAmount(clusterConfigPath)
