@@ -56,7 +56,11 @@ func main() {
 				return err
 			}
 
-			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+			resolveConfPath, err := cmd.Flags().GetString("resolvconf-path")
+			if err != nil {
+				return err
+			}
+			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
 			if err != nil {
 				return err
 			}
@@ -104,7 +108,11 @@ func main() {
 			if err != nil {
 				return err
 			}
-			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+			resolveConfPath, err := cmd.Flags().GetString("resolvconf-path")
+			if err != nil {
+				return err
+			}
+			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
 			if err != nil {
 				return err
 			}
@@ -134,6 +142,7 @@ func main() {
 	rootCmd.PersistentFlags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
 	rootCmd.PersistentFlags().Uint16("lb-port", 7443, "Port where the API HAProxy LB will listen at")
 	rootCmd.PersistentFlags().Uint16("stat-port", 50000, "Port where the HAProxy stats API will listen at")
+	rootCmd.PersistentFlags().StringP("resolvconf-path", "r", "/etc/resolv.conf", "Optional path to a resolv.conf file to use to get upstream DNS servers")
 
 	rootCmd.AddCommand(displayCmd)
 	rootCmd.AddCommand(renderCmd)

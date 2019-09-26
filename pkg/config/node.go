@@ -57,8 +57,8 @@ type Node struct {
 	DNSUpstreams      []string
 }
 
-func getDNSUpstreams() (upstreams []string, err error) {
-	dnsFile, err := os.Open("/etc/resolv.conf")
+func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
+	dnsFile, err := os.Open(resolvConfPath)
 	if err != nil {
 		return upstreams, err
 	}
@@ -142,7 +142,7 @@ func getClusterConfigMapInstallConfig(configPath string) (installConfig types.In
 	return ic, err
 }
 
-func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	// Try cluster-config.yml first
 	clusterName, clusterDomain, err := getClusterConfigClusterNameAndDomain(clusterConfigPath)
 	if err != nil {
@@ -198,7 +198,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath string, apiVip net.IP, ingressV
 	}
 	node.NonVirtualIP = nonVipAddr.IP.String()
 
-	resolvConfUpstreams, err := getDNSUpstreams()
+	resolvConfUpstreams, err := getDNSUpstreams(resolvConfPath)
 	if err != nil {
 		return node, err
 	}
