@@ -38,7 +38,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		case <-done:
 			return nil
 		default:
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
