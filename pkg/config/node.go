@@ -32,6 +32,7 @@ type Cluster struct {
 	IngressVirtualRouterID uint8
 	VIPNetmask             int
 	MasterAmount           int64
+	EtcdBackends           string
 }
 
 type Backend struct {
@@ -218,6 +219,16 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	node.LBConfig, err = GetLBConfig(domain, apiPort, lbPort, statPort)
 	if err != nil {
 		return node, err
+	}
+	etcdBackends, err := getSortedBackends(domain)
+	if err != nil {
+		return node, err
+	}
+	for _, backend := range etcdBackends {
+		if len(node.Cluster.EtcdBackends) > 0 {
+			node.Cluster.EtcdBackends += ","
+		}
+		node.Cluster.EtcdBackends += fmt.Sprintf("https://%s:2379", strings.TrimRight(backend.Host, "."))
 	}
 
 	return node, err
