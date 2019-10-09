@@ -54,7 +54,7 @@ func main() {
 	rootCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
 	rootCmd.Flags().Uint16("lb-port", 7443, "Port where the API HAProxy LB will listen at")
 	rootCmd.Flags().Uint16("stat-port", 50000, "Port where the HAProxy stats API will listen at")
-	rootCmd.Flags().Duration("check-interval", time.Second*15, "Time between monitor checks")
+	rootCmd.Flags().Duration("check-interval", time.Second*6, "Time between monitor checks")
 	rootCmd.Flags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
