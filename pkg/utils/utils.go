@@ -13,8 +13,8 @@ import (
 func FletcherChecksum8(inp string) uint8 {
 	var ckA, ckB uint8
 	for i := 0; i < len(inp); i++ {
-		ckA = (ckA + inp[i]) & 0xf
-		ckB = (ckB + ckA) & 0xf
+		ckA = (ckA + inp[i]) % 0xf
+		ckB = (ckB + ckA) % 0xf
 	}
 	return (ckB << 4) | ckA
 }
