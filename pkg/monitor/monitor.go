@@ -41,7 +41,6 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 	signal.Notify(signals, syscall.SIGINT)
 	go func() {
 		<-signals
-		cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
 		done <- true
 	}()
 
@@ -56,6 +55,7 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 	for {
 		select {
 		case <-done:
+			cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
 			return nil
 		default:
 			config, err := config.GetLBConfig(domain, apiPort, lbPort, statPort)
