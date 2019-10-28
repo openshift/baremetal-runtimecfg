@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"net"
 	"strconv"
 	"strings"
 
@@ -16,12 +17,20 @@ const (
 func getHAProxyRuleSpec(apiVip string, apiPort, lbPort uint16) (ruleSpec []string, err error) {
 	apiPortStr := strconv.Itoa(int(apiPort))
 	lbPortStr := strconv.Itoa(int(lbPort))
-	ruleSpec = []string{"--src", "0/0", "--dst", apiVip, "-p", "tcp", "--dport", apiPortStr, "-j", "REDIRECT", "--to-ports", lbPortStr, "-m", "comment", "--comment", "OCP_API_LB_REDIRECT"}
+	ruleSpec = []string{"--dst", apiVip, "-p", "tcp", "--dport", apiPortStr, "-j", "REDIRECT", "--to-ports", lbPortStr, "-m", "comment", "--comment", "OCP_API_LB_REDIRECT"}
 	return ruleSpec, err
 }
 
+func getProtocolbyIp(ipStr string) iptables.Protocol {
+	net_ipStr := net.ParseIP(ipStr)
+	if net_ipStr.To4() != nil {
+		return iptables.ProtocolIPv4
+	}
+	return iptables.ProtocolIPv6
+}
+
 func cleanHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
-	ipt, err := iptables.New()
+	ipt, err := iptables.NewWithProtocol(getProtocolbyIp(apiVip))
 	if err != nil {
 		return err
 	}
@@ -41,7 +50,7 @@ func cleanHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
 }
 
 func ensureHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
-	ipt, err := iptables.New()
+	ipt, err := iptables.NewWithProtocol(getProtocolbyIp(apiVip))
 	if err != nil {
 		return err
 	}
