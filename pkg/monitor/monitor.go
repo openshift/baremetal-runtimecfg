@@ -58,7 +58,7 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 			cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
 			return nil
 		default:
-			config, err := config.GetLBConfig(domain, apiPort, lbPort, statPort)
+			config, err := config.GetLBConfig(domain, apiPort, lbPort, statPort, net.ParseIP(apiVip))
 			if err != nil {
 				return err
 			}
