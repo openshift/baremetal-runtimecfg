@@ -79,8 +79,8 @@ func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
 		case "nameserver":
 			// CoreDNS forward plugin takes up to 15 upstream servers
 			if len(fields) > 1 && len(upstreams) < 15 {
+				upstreams = append(upstreams, fields[1])
 			}
-			upstreams = append(upstreams, fields[1])
 		}
 	}
 	if err := scanner.Err(); err != nil {
