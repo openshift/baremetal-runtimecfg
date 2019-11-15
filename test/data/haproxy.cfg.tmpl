@@ -10,7 +10,7 @@ defaults
   timeout server       86400s
   timeout tunnel       86400s
 frontend  main
-  bind :{{ .LBConfig.LbPort }}
+  bind {{ .LBConfig.FrontendAddr }}:{{ .LBConfig.LbPort }}
   default_backend masters
 listen stats
   bind 127.0.0.1:{{ .LBConfig.StatPort }}

@@ -42,10 +42,11 @@ type Backend struct {
 }
 
 type ApiLBConfig struct {
-	ApiPort  uint16
-	LbPort   uint16
-	StatPort uint16
-	Backends []Backend
+	ApiPort      uint16
+	LbPort       uint16
+	StatPort     uint16
+	Backends     []Backend
+	FrontendAddr string
 }
 
 type Node struct {
@@ -216,7 +217,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	// Filter out our potential CoreDNS addresses from upstream servers
 	node.DNSUpstreams = make([]string, 0)
 	for _, upstream := range resolvConfUpstreams {
-		if upstream != node.NonVirtualIP && upstream != node.Cluster.DNSVIP && upstream != "127.0.0.1" {
+		if upstream != node.NonVirtualIP && upstream != node.Cluster.DNSVIP && upstream != "127.0.0.1" && upstream != "::1" {
 			node.DNSUpstreams = append(node.DNSUpstreams, upstream)
 		}
 	}
@@ -226,7 +227,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	node.VRRPInterface = vipIface.Name
 
 	domain := fmt.Sprintf("%s.%s", clusterName, clusterDomain)
-	node.LBConfig, err = GetLBConfig(domain, apiPort, lbPort, statPort)
+	node.LBConfig, err = GetLBConfig(domain, apiPort, lbPort, statPort, apiVip)
 	if err != nil {
 		return node, err
 	}
@@ -270,12 +271,17 @@ func getSortedBackends(domain string) (backends []Backend, err error) {
 	return backends, err
 }
 
-func GetLBConfig(domain string, apiPort, lbPort, statPort uint16) (ApiLBConfig, error) {
+func GetLBConfig(domain string, apiPort, lbPort, statPort uint16, apiVip net.IP) (ApiLBConfig, error) {
 	config := ApiLBConfig{
 		ApiPort:  apiPort,
 		LbPort:   lbPort,
 		StatPort: statPort,
 	}
+	// LB frontend address: IPv6 '::' , IPv4 ''
+	if apiVip.To4() == nil {
+		config.FrontendAddr = "::"
+	}
+
 	backends, err := getSortedBackends(domain)
 	if err != nil {
 		log.WithFields(logrus.Fields{
