@@ -22,17 +22,20 @@ import (
 var log = logrus.New()
 
 type Cluster struct {
-	Name                   string
-	Domain                 string
-	APIVIP                 string
-	APIVirtualRouterID     uint8
-	DNSVIP                 string
-	DNSVirtualRouterID     uint8
-	IngressVIP             string
-	IngressVirtualRouterID uint8
-	VIPNetmask             int
-	MasterAmount           int64
-	EtcdBackends           string
+	Name                           string
+	Domain                         string
+	APIVIP                         string
+	APIVirtualRouterID             uint8
+	DNSVIP                         string
+	DNSVirtualRouterID             uint8
+	IngressVIP                     string
+	IngressVirtualRouterID         uint8
+	APIProvisioningVIP             string
+	APIProvisioningVirtualRouterID uint8
+	VIPNetmask                     int
+	ProvVIPNetmask                 int
+	MasterAmount                   int64
+	EtcdBackends                   string
 }
 
 type Backend struct {
@@ -56,6 +59,7 @@ type Node struct {
 	ShortHostname     string
 	EtcdShortHostname string
 	VRRPInterface     string
+	VRRPProvInterface string
 	DNSUpstreams      []string
 }
 
@@ -144,7 +148,7 @@ func getClusterConfigMapInstallConfig(configPath string) (installConfig types.In
 	return ic, err
 }
 
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiProvisioningVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	// Try cluster-config.yml first
 	clusterName, clusterDomain, err := getClusterConfigClusterNameAndDomain(clusterConfigPath)
 	if err != nil {
@@ -170,6 +174,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	for node.Cluster.IngressVirtualRouterID == node.Cluster.DNSVirtualRouterID || node.Cluster.IngressVirtualRouterID == node.Cluster.APIVirtualRouterID {
 		node.Cluster.IngressVirtualRouterID++
 	}
+	node.Cluster.APIProvisioningVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-api-provisioning") + 1
 
 	if clusterConfigPath != "" {
 		masterAmount, err := getClusterConfigMasterAmount(clusterConfigPath)
@@ -204,6 +209,28 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 		vips = append(vips, dnsVip)
 		node.Cluster.DNSVIP = dnsVip.String()
 	}
+	if apiProvisioningVip != nil {
+		node.Cluster.APIProvisioningVIP = apiProvisioningVip.String()
+	} else {
+		apiProvisioningVips, err := net.LookupIP(strings.Join([]string{"provisioning-api", node.Cluster.Name, node.Cluster.Domain}, "."))
+		if err != nil {
+			// Ignore it. For now.
+			log.Error(err)
+		} else {
+			apiProvisioningVip = apiProvisioningVips[0]
+			node.Cluster.APIProvisioningVIP = apiProvisioningVip.String()
+		}
+	}
+	if apiProvisioningVip != nil {
+		provVipIface, provNonVipAddr, err := getInterfaceAndNonVIPAddr([]net.IP{apiProvisioningVip})
+		if err != nil {
+			return node, err
+		}
+		provPrefix, _ := provNonVipAddr.Mask.Size()
+		node.VRRPProvInterface = provVipIface.Name
+		node.Cluster.ProvVIPNetmask = provPrefix
+	}
+
 	vipIface, nonVipAddr, err := getInterfaceAndNonVIPAddr(vips)
 	if err != nil {
 		return node, err

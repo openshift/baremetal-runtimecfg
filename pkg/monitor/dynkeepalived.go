@@ -14,7 +14,7 @@ import (
 
 const keepalivedControlSock = "/var/run/keepalived/keepalived.sock"
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiProvisioningVip net.IP, interval time.Duration) error {
 	var prevConfig *config.Node
 
 	signals := make(chan os.Signal, 1)
@@ -38,7 +38,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		case <-done:
 			return nil
 		default:
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, apiProvisioningVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}

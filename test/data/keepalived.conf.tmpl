@@ -16,6 +16,12 @@ vrrp_script chk_ingress {
     weight 50
 }
 
+{{if .Cluster.APIProvisioningVIP}}
+vrrp_script chk_api_prov {
+    script "curl -o /dev/null -kLs https://0:2379"
+}
+{{end}}
+
 vrrp_instance {{.Cluster.Name}}_API {
     state BACKUP
     interface {{.VRRPInterface}}
@@ -51,3 +57,23 @@ vrrp_instance {{.Cluster.Name}}_INGRESS {
         chk_ingress
     }
 }
+
+{{if .Cluster.APIProvisioningVIP}}
+vrrp_instance {{.Cluster.Name}}_PROVISION {
+    state BACKUP
+    interface {{ .VRRPProvInterface }}
+    virtual_router_id {{ .Cluster.APIProvisioningVirtualRouterID }}
+    priority 40
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ .Cluster.Name }}_api_provisioning_vip
+    }
+    virtual_ipaddress {
+        {{ .Cluster.APIProvisioningVIP }}/{{ .Cluster.ProvVIPNetmask }}
+    }
+    track_script {
+        chk_api_prov
+    }
+}
+{{end}}

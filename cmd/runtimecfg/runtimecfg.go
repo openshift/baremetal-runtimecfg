@@ -43,6 +43,10 @@ func main() {
 			if err != nil {
 				return err
 			}
+			apiProvisioningVip, err := cmd.Flags().GetIP("api-provisioning-vip")
+			if err != nil {
+				apiProvisioningVip = nil
+			}
 			lbPort, err := cmd.Flags().GetUint16("lb-port")
 			if err != nil {
 				return err
@@ -60,7 +64,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiProvisioningVip, apiPort, lbPort, statPort)
 			if err != nil {
 				return err
 			}
@@ -96,6 +100,10 @@ func main() {
 			if err != nil {
 				return err
 			}
+			apiProvisioningVip, err := cmd.Flags().GetIP("api-provisioning-vip")
+			if err != nil {
+				apiProvisioningVip = nil
+			}
 			lbPort, err := cmd.Flags().GetUint16("lb-port")
 			if err != nil {
 				return err
@@ -112,7 +120,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+			config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiProvisioningVip, apiPort, lbPort, statPort)
 			if err != nil {
 				return err
 			}
@@ -139,6 +147,7 @@ func main() {
 	rootCmd.PersistentFlags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
 	rootCmd.PersistentFlags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")
 	rootCmd.PersistentFlags().IP("dns-vip", nil, "Virtual IP Address to reach an OpenShift node resolving DNS server")
+	rootCmd.PersistentFlags().IP("api-provisioning-vip", nil, "Virtual IP Address to reach Ignition")
 	rootCmd.PersistentFlags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
 	rootCmd.PersistentFlags().Uint16("lb-port", 7443, "Port where the API HAProxy LB will listen at")
 	rootCmd.PersistentFlags().Uint16("stat-port", 50000, "Port where the HAProxy stats API will listen at")
