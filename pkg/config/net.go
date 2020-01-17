@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
@@ -27,7 +28,12 @@ func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 				if _, ok := vipMap[n.IP.String()]; ok {
 					continue // This is a VIP, let's skip
 				}
-				if n.Contains(vips[0]) {
+				// FIXME: Breaks if more then one interface on the host has the same prefix
+				// DHCPv6 assigns addresses with a /128 if encountered assume /64
+				// so that the n.Contains returns true if the VIP has the same prefix
+				_, nn, _ := net.ParseCIDR(strings.Replace(addr.String(), "/128", "/64", 1))
+
+				if nn.Contains(vips[0]) {
 					return iface, n, err
 				}
 			default:
