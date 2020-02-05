@@ -51,9 +51,14 @@ func ShortHostname() (shortName string, err error) {
 			"hostname": hostname,
 		}).Debug("Hostname retrieved from OS")
 	}
-	splitHostname := strings.SplitN(hostname, ".", 2)
+	shortName = GetShortHostname(hostname)
+	return shortName, nil
+}
+
+func GetShortHostname(hostName string) (shortName string) {
+	splitHostname := strings.SplitN(hostName, ".", 2)
 	shortName = splitHostname[0]
-	return shortName, err
+	return shortName
 }
 
 func EtcdShortHostname() (shortName string, err error) {
@@ -82,6 +87,14 @@ func GetFirstAddr(host string) (string, error) {
 		return "", err
 	}
 	return addrs[0], nil
+}
+
+func GetFirstHost(addr string) (string, error) {
+	hosts, err := net.LookupAddr(addr)
+	if err != nil {
+		return "", err
+	}
+	return hosts[0], nil
 }
 
 func IsKubernetesHealthy(port uint16) (bool, error) {

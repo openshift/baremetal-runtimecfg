@@ -44,7 +44,9 @@ network_closure.sh
 /.make/
 
 # binary
-runtimecfg
-monitor
-dynkeepalived
-corednsmonitor
+^runtimecfg$
+^monitor$
+^dynkeepalived$
+^unicastipserver$
+^corednsmonitor$
+

@@ -7,15 +7,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 	"github.com/sirupsen/logrus"
 )
 
 const keepalivedControlSock = "/var/run/keepalived/keepalived.sock"
+const cfgKeepalivedChangeThreshold uint8 = 3
 
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, interval time.Duration) error {
-	var prevConfig *config.Node
+	var appliedConfig, curConfig, prevConfig *config.Node
+	var configChangeCtr uint8 = 0
+	var bootstrapIP string
 
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
@@ -42,25 +46,55 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			if err != nil {
 				return err
 			}
-			if prevConfig == nil || prevConfig.VRRPInterface != newConfig.VRRPInterface {
+
+			if newConfig.EnableUnicast {
+				if bootstrapIP == "" {
+					bootstrapIP, err = config.GetBootstrapIP(apiVip.String())
+					if err != nil {
+						log.Warnf("Could not retrieve bootstrap IP: %v", err)
+					}
+				}
+				if newConfig.BootstrapIP == "" {
+					newConfig.BootstrapIP = bootstrapIP
+				}
+
+				newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
+				if err != nil {
+					log.Warnf("Could not retrieve ingress config: %v", err)
+				}
+			}
+
+			curConfig = &newConfig
+			if appliedConfig == nil || !cmp.Equal(*appliedConfig, *curConfig) {
+				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
+					configChangeCtr++
+				} else {
+					configChangeCtr = 1
+				}
 				log.WithFields(logrus.Fields{
 					"new config": newConfig,
 				}).Info("Config change detected")
-				err = render.RenderFile(cfgPath, templatePath, newConfig)
-				if err != nil {
-					log.WithFields(logrus.Fields{
-						"config": newConfig,
-					}).Error("Failed to render Keepalived configuration")
-					return err
-				}
+				if configChangeCtr >= cfgKeepalivedChangeThreshold {
+					err = render.RenderFile(cfgPath, templatePath, newConfig)
+					if err != nil {
+						log.WithFields(logrus.Fields{
+							"config": newConfig,
+						}).Error("Failed to render Keepalived configuration")
+						return err
+					}
 
-				_, err = conn.Write([]byte("reload\n"))
-				if err != nil {
-					log.WithFields(logrus.Fields{
-						"socket": keepalivedControlSock,
-					}).Error("Failed to write reload to Keepalived container control socket")
-					return err
+					_, err = conn.Write([]byte("reload\n"))
+					if err != nil {
+						log.WithFields(logrus.Fields{
+							"socket": keepalivedControlSock,
+						}).Error("Failed to write reload to Keepalived container control socket")
+						return err
+					}
+					configChangeCtr = 0
+					appliedConfig = curConfig
 				}
+			} else {
+				configChangeCtr = 0
 			}
 			prevConfig = &newConfig
 			time.Sleep(interval)
