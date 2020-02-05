@@ -48,3 +48,4 @@ network_closure.sh
 /monitor
 /dynkeepalived
 /corednsmonitor
+/unicastipserver

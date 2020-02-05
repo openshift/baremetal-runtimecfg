@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
@@ -23,6 +24,7 @@ import (
 )
 
 const localhostKubeApiServerUrl string = "https://localhost:6443"
+const bootstrapIpServerPort string = "64444"
 
 var log = logrus.New()
 
@@ -57,6 +59,10 @@ type ApiLBConfig struct {
 	FrontendAddr string
 }
 
+type IngressConfig struct {
+	Peers []string
+}
+
 type Node struct {
 	Cluster           Cluster
 	LBConfig          ApiLBConfig
@@ -65,6 +71,9 @@ type Node struct {
 	EtcdShortHostname string
 	VRRPInterface     string
 	DNSUpstreams      []string
+	BootstrapIP       string
+	IngressConfig     IngressConfig
+	EnableUnicast     bool
 }
 
 func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
@@ -172,6 +181,67 @@ func (c *Cluster) PopulateVRIDs() error {
 	}
 	return nil
 }
+func GetBootstrapIP(apiVip string) (bootstrapIP string, err error) {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(apiVip, bootstrapIpServerPort), 10*time.Second)
+	if err != nil {
+		log.Infof("An error occurred on dial: %v", err)
+		return "", err
+	}
+	defer conn.Close()
+
+	bootstrapIP, err = bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		log.Infof("An error occurred on read: %v", err)
+		return "", err
+	}
+
+	bootstrapIP = strings.TrimSpace(bootstrapIP)
+
+	log.Infof("Got bootstrap IP %v", bootstrapIP)
+
+	return bootstrapIP, err
+}
+
+func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
+	vips := make([]net.IP, 0)
+	if apiVip != nil {
+		vips = append(vips, apiVip)
+	}
+	if ingressVip != nil {
+		vips = append(vips, ingressVip)
+	}
+	if dnsVip != nil {
+		vips = append(vips, dnsVip)
+	}
+	return getInterfaceAndNonVIPAddr(vips)
+}
+
+func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err error) {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return ingressConfig, err
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return ingressConfig, err
+	}
+
+	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err != nil {
+		return ingressConfig, err
+	}
+
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			if address.Type == v1.NodeInternalIP {
+				ingressConfig.Peers = append(ingressConfig.Peers, address.Address)
+			}
+		}
+	}
+
+	return ingressConfig, nil
+}
 
 func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	// Try cluster-config.yml first
@@ -207,12 +277,9 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	if err != nil {
 		return node, err
 	}
-
-	vips := make([]net.IP, 0)
 	node.Cluster.APIVIPRecordType = "A"
 	node.Cluster.APIVIPEmptyType = "AAAA"
 	if apiVip != nil {
-		vips = append(vips, apiVip)
 		node.Cluster.APIVIP = apiVip.String()
 		if apiVip.To4() == nil {
 			node.Cluster.APIVIPRecordType = "AAAA"
@@ -222,7 +289,6 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	node.Cluster.IngressVIPRecordType = "A"
 	node.Cluster.IngressVIPEmptyType = "AAAA"
 	if ingressVip != nil {
-		vips = append(vips, ingressVip)
 		node.Cluster.IngressVIP = ingressVip.String()
 		if ingressVip.To4() == nil {
 			node.Cluster.IngressVIPRecordType = "AAAA"
@@ -230,14 +296,18 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 		}
 	}
 	if dnsVip != nil {
-		vips = append(vips, dnsVip)
 		node.Cluster.DNSVIP = dnsVip.String()
 	}
-	vipIface, nonVipAddr, err := getInterfaceAndNonVIPAddr(vips)
+	vipIface, nonVipAddr, err := GetVRRPConfig(apiVip, ingressVip, dnsVip)
 	if err != nil {
 		return node, err
 	}
 	node.NonVirtualIP = nonVipAddr.IP.String()
+
+	node.EnableUnicast = false
+	if os.Getenv("ENABLE_UNICAST") == "yes" {
+		node.EnableUnicast = true
+	}
 
 	resolvConfUpstreams, err := getDNSUpstreams(resolvConfPath)
 	if err != nil {
@@ -339,7 +409,6 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 			return config, err
 		}
 	}
-
 	// The backends port is the Etcd one, but we need to loadbalance the API one
 	for i := 0; i < len(backends); i++ {
 		backends[i].Port = apiPort
