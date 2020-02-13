@@ -8,7 +8,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
+
+var log = logrus.New()
 
 func FletcherChecksum8(inp string) uint8 {
 	var ckA, ckB uint8
@@ -20,9 +24,29 @@ func FletcherChecksum8(inp string) uint8 {
 }
 
 func ShortHostname() (shortName string, err error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		panic(err)
+	var hostname string
+
+	if filePath, ok := os.LookupEnv("RUNTIMECFG_HOSTNAME_PATH"); ok {
+		dat, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"filePath": filePath,
+			}).Error("Failed to read file")
+			return "", err
+		}
+		hostname = strings.TrimSuffix(string(dat), "\n")
+		log.WithFields(logrus.Fields{
+			"hostname": hostname,
+			"file":     filePath,
+		}).Debug("Hostname retrieved from a file")
+	} else {
+		hostname, err = os.Hostname()
+		if err != nil {
+			panic(err)
+		}
+		log.WithFields(logrus.Fields{
+			"hostname": hostname,
+		}).Debug("Hostname retrieved from OS")
 	}
 	splitHostname := strings.SplitN(hostname, ".", 2)
 	shortName = splitHostname[0]
