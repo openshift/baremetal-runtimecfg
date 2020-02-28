@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"crypto/md5"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -119,4 +122,20 @@ func AlarmStabilization(cur_alrm bool, cur_defect bool, consecutive_ctr uint8, o
 		consecutive_ctr = 0
 	}
 	return new_alrm, consecutive_ctr
+}
+
+func GetFileMd5(filePath string) (string, error) {
+	var returnMD5String string
+	file, err := os.Open(filePath)
+	if err != nil {
+		return returnMD5String, err
+	}
+	defer file.Close()
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return returnMD5String, err
+	}
+	hashInBytes := hash.Sum(nil)[:16]
+	returnMD5String = hex.EncodeToString(hashInBytes)
+	return returnMD5String, nil
 }
