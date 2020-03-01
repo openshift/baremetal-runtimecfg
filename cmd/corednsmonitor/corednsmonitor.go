@@ -45,7 +45,7 @@ func main() {
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
-	rootCmd.Flags().Duration("check-interval", time.Second*120, "Time between keepalived watch checks")
+	rootCmd.Flags().Duration("check-interval", time.Second*30, "Time between coredns watch checks")
 	rootCmd.Flags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
 	rootCmd.PersistentFlags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")
 	rootCmd.PersistentFlags().IP("dns-vip", nil, "Virtual IP Address to reach an OpenShift node resolving DNS server")
