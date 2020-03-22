@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -27,7 +26,7 @@ type RuntimeConfig struct {
 	LBConfig *config.ApiLBConfig
 }
 
-func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, apiPort, lbPort, statPort uint16, interval time.Duration) error {
+func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, apiVip string, apiPort, lbPort, statPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.ApiLBConfig
 	var K8sHealthSts bool = false
 	var oldK8sHealthSts bool
@@ -50,7 +49,6 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 	}
 	defer conn.Close()
 
-	domain := fmt.Sprintf("%s.%s", clusterName, clusterDomain)
 	log.Info("API is not reachable through HAProxy")
 	for {
 		select {
@@ -58,9 +56,13 @@ func Monitor(clusterName, clusterDomain, templatePath, cfgPath, apiVip string, a
 			cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
 			return nil
 		default:
-			config, err := config.GetLBConfig(domain, apiPort, lbPort, statPort, net.ParseIP(apiVip))
+			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, net.ParseIP(apiVip))
 			if err != nil {
-				return err
+				log.WithFields(logrus.Fields{
+					"kubeconfigPath": kubeconfigPath,
+				}).Info("GetLBConfig failed, sleep half of interval and retry")
+				time.Sleep(interval / 2)
+				continue
 			}
 			curConfig = &config
 			if appliedConfig == nil || !cmp.Equal(*appliedConfig, *curConfig) {

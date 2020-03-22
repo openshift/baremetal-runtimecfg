@@ -48,7 +48,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			return monitor.Monitor(clusterName, clusterDomain, args[1], args[2], apiVip.String(), apiPort, lbPort, statPort, checkInterval)
+			return monitor.Monitor(args[0], clusterName, clusterDomain, args[1], args[2], apiVip.String(), apiPort, lbPort, statPort, checkInterval)
 		},
 	}
 	rootCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
