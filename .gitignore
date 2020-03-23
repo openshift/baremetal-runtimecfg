@@ -47,3 +47,4 @@ network_closure.sh
 runtimecfg
 monitor
 dynkeepalived
+corednsmonitor
