@@ -1,0 +1,190 @@
+#!/usr/libexec/platform-python
+# /* vim: set filetype=python : */
+from __future__ import absolute_import
+import collections
+import itertools
+import socket
+import struct
+import subprocess
+import sys
+from typing import Callable, Iterable, Iterator, List, Optional, Tuple, Type, TypeVar
+class SubnetNotFoundException(Exception):
+    u"""
+    Exception raised when no subnet in the systems ifaces is on the VIP subnet
+    """
+class AddressNotFoundException(Exception):
+    u"""
+    Exception raised when no Address in the systems ifaces is on the VIP subnet
+    """
+TA = TypeVar(u'TA', bound=u'Address')
+class Address(object):
+    def __init__(self, cidr, name, family, index = -1, scope = u'', flags = tuple(), label = None):
+        self.index = index
+        self.name = name
+        self.family = family
+        self.cidr = cidr
+        self.scope = scope
+        self.flags = flags
+        self.label = label
+    @classmethod
+    def from_line(cls, line):
+        tokens = collections.deque(line.split())
+        index = int(tokens.popleft()[:-1])
+        name = tokens.popleft()
+        family = tokens.popleft()
+        cidr = tokens.popleft()
+        _ = tokens.popleft()  # dump scope label
+        scope = tokens.popleft()
+        flags = []
+        label = None
+        while True:
+            token = tokens.popleft()
+            if token[-1] == u'\\':
+                if len(token) > 1:
+                    label = token[:-1]
+                break
+            flags.append(token)
+        return cls(cidr, name, family, index, scope, flags, label)
+    def __str__(self):
+        return f'{self.__class__.__name__}({self.cidr}, dev={self.name})'
+TR = TypeVar(u'TR', bound=u'V6Route')
+class V6Route(object):
+    def __init__(self, destination, dev = None, proto = None, metric = None, pref = None, via = None):
+            self.destination: unicode = destination
+            self.via: Optional[unicode] = via
+            self.dev: Optional[unicode] = dev
+            self.proto: Optional[unicode] = proto
+            self.metric: Optional[int] = metric
+            self.pref: Optional[unicode] = pref
+    @classmethod
+    def from_line(cls, line):
+        items = line.split()
+        dest = items[0]
+        if dest == u'default':
+            dest = u'::/0'
+        attrs = dict(itertools.zip_longest(*[iter(items[1:])]*2, fillvalue=None))
+        attrs[u'destination'] = dest
+        return cls(**attrs)
+    def __str__(self):
+        return f'{self.__class__.__name__}({self.destination}, dev={self.dev})'
+SUBNET_MASK_LEN = {
+    u'inet': 32,
+    u'inet6': 128
+}
+def ntoa(family, num):
+    if family == u'inet':
+        result = socket.inet_ntoa(struct.pack(u"!I", num))
+    else:
+        lo_half = num & 0xFFFFFFFFFFFFFFFF
+        hi_half = num >> 64
+        result = socket.inet_ntop(socket.AF_INET6,
+                                    struct.pack(u">QQ", hi_half, lo_half))
+    return result
+def aton(family, rep):
+    if family == u'inet':
+        result = struct.unpack(u"!I", socket.inet_aton(rep))[0]
+    else:
+        hi_half, lo_half = struct.unpack(u">QQ", socket.inet_pton(socket.AF_INET6, rep))
+        result = (hi_half << 64) | lo_half
+    return result
+def addr_subnet_int_min_max(addr):
+    ip_addr, prefix = addr.cidr.split(u'/')
+    ip_int = aton(addr.family, ip_addr)
+    prefix_int = int(prefix)
+    mask = int(u'1' * prefix_int +
+                u'0' * (SUBNET_MASK_LEN[addr.family] - prefix_int), 2)
+    subnet_ip_int_min = ip_int & mask
+    remainder = u'1' * (SUBNET_MASK_LEN[addr.family] - prefix_int)
+    subnet_ip_int_max = subnet_ip_int_min | (
+        0 if remainder == u'' else int(remainder, 2))
+    return subnet_ip_int_min, subnet_ip_int_max
+def vip_subnet_and_addrs_in_it(vip, addrs):
+    try:
+        vip_int = aton(u'inet', vip)
+    except Exception:
+        vip_int = aton(u'inet6', vip)
+    subnet = None
+    candidates = []
+    for addr in addrs:
+        subnet_ip_int_min, subnet_ip_int_max = addr_subnet_int_min_max(addr)
+        subnet_ip = ntoa(addr.family, subnet_ip_int_min)
+        subnet_ip_max = ntoa(addr.family, subnet_ip_int_max)
+        sys.stderr.write(u'Is %s between %s and %s\n' %
+                            (vip, subnet_ip, subnet_ip_max))
+        if subnet_ip_int_min < vip_int < subnet_ip_int_max:
+            subnet_ip = ntoa(addr.family, subnet_ip_int_min)
+            subnet = Address(name=u"subnet",
+                                cidr=u'%s/%s' % (subnet_ip, addr.cidr.split(u'/')[1]),
+                                family=addr.family,
+                                scope=u'')
+            candidates.append(addr)
+    if subnet is None:
+        raise SubnetNotFoundException()
+    return subnet, candidates
+def interface_addrs(filters = None):
+    out = subprocess.check_output([u"ip", u"-o", u"addr", u"show"], encoding=sys.stdout.encoding)
+    for addr in (Address.from_line(line) for line in out.splitlines()):
+        if not filters or all(f(addr) for f in filters):
+            if (addr.family == u'inet6' and
+                    int(addr.cidr.split(u'/')[1]) == SUBNET_MASK_LEN[addr.family]):
+                route_out = subprocess.check_output([u"ip", u"-o", u"-6", u"route", u"show"],
+                                                    encoding=sys.stdout.encoding)
+                for route in (V6Route.from_line(rline) for rline in route_out.splitlines()):
+                    if (route.dev == addr.name and route.proto == u'ra' and
+                            route.destination != u'::/0'):
+                        sys.stderr.write(u'Checking %s for %s\n' % (route, addr))
+                        route_net = Address(name=route.dev, cidr=route.destination, family=u'inet6')
+                        route_filter = in_subnet(route_net)
+                        if route_filter(addr):
+                            ip_addr = addr.cidr.split(u'/')[0]
+                            route_prefix = route_net.cidr.split(u'/')[1]
+                            cidr = u'%s/%s' % (ip_addr, route_prefix)
+                            yield Address(cidr=cidr,
+                                            family=addr.family,
+                                            name=addr.name)
+            yield addr
+def non_host_scope(addr):
+    if addr.scope == u'host':
+        sys.stderr.write(f'Filtering out {addr} due to it having host scope\n')
+        res = False
+    else:
+        res = True
+    return res
+def non_deprecated(addr):
+    if u'deprecated' in addr.flags:
+        sys.stderr.write(f'Filtering out {addr} due to it being deprecated\n')
+        res = False
+    else:
+        res = True
+    return res
+def non_secondary(addr):
+    if u'secondary' in addr.flags:
+        sys.stderr.write(f'Filtering out {addr} due to it being secondary\n')
+        res = False
+    else:
+        res = True
+    return res
+def in_subnet(subnet):
+    subnet_ip_int_min, subnet_ip_int_max = addr_subnet_int_min_max(subnet)
+    def filt(addr):
+        ip_addr, _ = addr.cidr.split(u'/')
+        ip_int = aton(addr.family, ip_addr)
+        return subnet_ip_int_min < ip_int < subnet_ip_int_max
+    return filt
+def main():
+    api_vip = sys.argv[1]
+    vips = set(sys.argv[1:4])
+    filters = (non_host_scope, non_deprecated, non_secondary)
+    iface_addrs = list(interface_addrs(filters))
+    try:
+        subnet, candidates = vip_subnet_and_addrs_in_it(api_vip, iface_addrs)
+        sys.stderr.write(u'VIP Subnet %s\n' % subnet.cidr)
+        for addr in candidates:
+            ip_addr, _ = addr.cidr.split(u'/')
+            if ip_addr not in vips:
+                print ip_addr
+                sys.exit(0)
+    except SubnetNotFoundException:
+        sys.exit(1)
+if __name__ == u'__main__':
+    main()
