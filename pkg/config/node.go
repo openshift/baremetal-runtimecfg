@@ -144,6 +144,27 @@ func getClusterConfigMapInstallConfig(configPath string) (installConfig types.In
 	return ic, err
 }
 
+// PopulateVRIDs fills in the Virtual Router information for the provided Node configuration
+func (c *Cluster) PopulateVRIDs() error {
+	// Add one to the fletcher8 result because 0 is an invalid vrid in
+	// keepalived. This is safe because fletcher8 can never return 255 due to
+	// the modulo arithmetic that happens. The largest value it can return is
+	// 238 (0xEE).
+	if c.Name == "" {
+		return fmt.Errorf("Cluster name can't be empty")
+	}
+	c.APIVirtualRouterID = utils.FletcherChecksum8(c.Name+"-api") + 1
+	c.DNSVirtualRouterID = utils.FletcherChecksum8(c.Name+"-dns") + 1
+	if c.DNSVirtualRouterID == c.APIVirtualRouterID {
+		c.DNSVirtualRouterID++
+	}
+	c.IngressVirtualRouterID = utils.FletcherChecksum8(c.Name+"-ingress") + 1
+	for c.IngressVirtualRouterID == c.DNSVirtualRouterID || c.IngressVirtualRouterID == c.APIVirtualRouterID {
+		c.IngressVirtualRouterID++
+	}
+	return nil
+}
+
 func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	// Try cluster-config.yml first
 	clusterName, clusterDomain, err := getClusterConfigClusterNameAndDomain(clusterConfigPath)
@@ -157,19 +178,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	node.Cluster.Name = clusterName
 	node.Cluster.Domain = clusterDomain
 
-	// Add one to the fletcher8 result because 0 is an invalid vrid in
-	// keepalived. This is safe because fletcher8 can never return 255 due to
-	// the modulo arithmetic that happens. The largest value it can return is
-	// 238 (0xEE).
-	node.Cluster.APIVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-api") + 1
-	node.Cluster.DNSVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-dns") + 1
-	if node.Cluster.DNSVirtualRouterID == node.Cluster.APIVirtualRouterID {
-		node.Cluster.DNSVirtualRouterID++
-	}
-	node.Cluster.IngressVirtualRouterID = utils.FletcherChecksum8(node.Cluster.Name+"-ingress") + 1
-	for node.Cluster.IngressVirtualRouterID == node.Cluster.DNSVirtualRouterID || node.Cluster.IngressVirtualRouterID == node.Cluster.APIVirtualRouterID {
-		node.Cluster.IngressVirtualRouterID++
-	}
+	node.Cluster.PopulateVRIDs()
 
 	if clusterConfigPath != "" {
 		masterAmount, err := getClusterConfigMasterAmount(clusterConfigPath)
