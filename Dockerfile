@@ -1,7 +1,7 @@
 FROM registry.svc.ci.openshift.org/openshift/release:golang-1.12 AS builder
 WORKDIR /go/src/github.com/openshift/baremetal-runtimecfg
 COPY . .
-RUN GO111MODULE=on go build --mod=vendor cmd/runtimecfg/runtimecfg.go
+RUN GO111MODULE=on go build --mod=vendor -o runtimecfg ./cmd/runtimecfg
 RUN GO111MODULE=on go build --mod=vendor cmd/dynkeepalived/dynkeepalived.go
 RUN GO111MODULE=on go build --mod=vendor cmd/corednsmonitor/corednsmonitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/monitor/monitor.go
