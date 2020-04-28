@@ -28,10 +28,14 @@ type Cluster struct {
 	Domain                 string
 	APIVIP                 string
 	APIVirtualRouterID     uint8
+	APIVIPRecordType       string
+	APIVIPEmptyType        string
 	DNSVIP                 string
 	DNSVirtualRouterID     uint8
 	IngressVIP             string
 	IngressVirtualRouterID uint8
+	IngressVIPRecordType   string
+	IngressVIPEmptyType    string
 	VIPNetmask             int
 	MasterAmount           int64
 }
@@ -202,13 +206,25 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	}
 
 	vips := make([]net.IP, 0)
+	node.Cluster.APIVIPRecordType = "A"
+	node.Cluster.APIVIPEmptyType = "AAAA"
 	if apiVip != nil {
 		vips = append(vips, apiVip)
 		node.Cluster.APIVIP = apiVip.String()
+		if apiVip.To4() == nil {
+			node.Cluster.APIVIPRecordType = "AAAA"
+			node.Cluster.APIVIPEmptyType = "A"
+		}
 	}
+	node.Cluster.IngressVIPRecordType = "A"
+	node.Cluster.IngressVIPEmptyType = "AAAA"
 	if ingressVip != nil {
 		vips = append(vips, ingressVip)
 		node.Cluster.IngressVIP = ingressVip.String()
+		if ingressVip.To4() == nil {
+			node.Cluster.IngressVIPRecordType = "AAAA"
+			node.Cluster.IngressVIPEmptyType = "A"
+		}
 	}
 	if dnsVip != nil {
 		vips = append(vips, dnsVip)
