@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -229,6 +230,11 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 		if upstream != node.NonVirtualIP && upstream != node.Cluster.DNSVIP && upstream != "127.0.0.1" && upstream != "::1" {
 			node.DNSUpstreams = append(node.DNSUpstreams, upstream)
 		}
+	}
+	// If we end up with no upstream DNS servers we'll generate an invalid
+	// coredns config. Error out so the init container retries.
+	if len(node.DNSUpstreams) < 1 {
+		return node, errors.New("No upstream DNS servers found")
 	}
 
 	prefix, _ := nonVipAddr.Mask.Size()
