@@ -4,12 +4,6 @@ vrrp_script chk_ocp {
     weight 50
 }
 
-vrrp_script chk_dns {
-    script "host -t SRV _etcd-server-ssl._tcp.{{.Cluster.Domain}} localhost"
-    interval 1
-    weight 50
-}
-
 vrrp_script chk_ingress {
     script "curl -o /dev/null -kLs https://0:1936/healthz"
     interval 1

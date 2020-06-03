@@ -70,14 +70,6 @@ func EtcdShortHostname() (shortName string, err error) {
 	return etcdHostname, err
 }
 
-func GetEtcdSRVMembers(domain string) (srvs []*net.SRV, err error) {
-	_, srvs, err = net.LookupSRV("etcd-server-ssl", "tcp", domain)
-	if err != nil {
-		return srvs, err
-	}
-	return srvs, err
-}
-
 func GetFirstAddr(host string) (string, error) {
 	addrs, err := net.LookupHost(host)
 	if err != nil {
