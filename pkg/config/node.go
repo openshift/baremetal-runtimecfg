@@ -22,6 +22,8 @@ import (
 	"github.com/openshift/installer/pkg/types"
 )
 
+const localhostKubeApiServerUrl string = "https://localhost:6443"
+
 var log = logrus.New()
 
 type Cluster struct {
@@ -261,9 +263,15 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	return node, err
 }
 
+// getSortedBackends builds config to communicate with kube-api based on kubeconfigPath parameter value, if kubeconfigPath is not empty it will build the
+// config based on that content else config will point to localhost.
 func getSortedBackends(kubeconfigPath string) (backends []Backend, err error) {
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	kubeApiServerUrl := ""
+	if kubeconfigPath == "" {
+		kubeApiServerUrl = localhostKubeApiServerUrl
+	}
+	config, err := clientcmd.BuildConfigFromFlags(kubeApiServerUrl, kubeconfigPath)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"err": err,
@@ -313,17 +321,23 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 		LbPort:   lbPort,
 		StatPort: statPort,
 	}
+
 	// LB frontend address: IPv6 '::' , IPv4 ''
 	if apiVip.To4() == nil {
 		config.FrontendAddr = "::"
 	}
-
+	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
 	backends, err := getSortedBackends(kubeconfigPath)
 	if err != nil {
-		log.WithFields(logrus.Fields{
-			"kubeconfigPath": kubeconfigPath,
-		}).Error("Failed to retrieve API members information")
-		return config, err
+		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
+		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
+		backends, err = getSortedBackends("")
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"kubeconfigPath": kubeconfigPath,
+			}).Error("Failed to retrieve API members information")
+			return config, err
+		}
 	}
 
 	// The backends port is the Etcd one, but we need to loadbalance the API one
