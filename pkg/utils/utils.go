@@ -83,7 +83,7 @@ func IsKubernetesHealthy(port uint16) (bool, error) {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: transport}
-	resp, err := client.Get(fmt.Sprintf("https://127.0.0.1:%d/healthz", port))
+	resp, err := client.Get(fmt.Sprintf("https://localhost:%d/readyz", port))
 	if err != nil {
 		return false, err
 	}
