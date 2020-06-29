@@ -94,7 +94,7 @@ func retrieveBootstrapIpAddr(apiVip string) {
 	}
 }
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
@@ -172,6 +172,32 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				configChangeCtr = 0
 			}
 			prevConfig = &newConfig
+
+			// Signal to keepalived whether the haproxy firewall rule is in place
+			ruleExists, err := checkHAProxyPreRoutingRule(apiVip.String(), apiPort, lbPort)
+			if err != nil {
+				log.Error("Failed to check for haproxy firewall rule")
+			} else {
+				filePath := "/var/run/keepalived/iptables-rule-exists"
+				if ruleExists {
+					// FIXME: DRY this
+					_, err := os.Stat(filePath)
+					if os.IsNotExist(err) {
+						_, err := os.Create(filePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": filePath}).Error("Failed to create file")
+						}
+					}
+				} else {
+					_, err := os.Stat(filePath)
+					if ! os.IsNotExist(err) {
+						err := os.Remove(filePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": filePath}).Error("Failed to remove file")
+						}
+					}
+				}
+			}
 			time.Sleep(interval)
 		}
 	}

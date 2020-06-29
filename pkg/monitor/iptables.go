@@ -68,3 +68,18 @@ func ensureHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
 		return ipt.Insert(table, chain, 1, ruleSpec...)
 	}
 }
+
+func checkHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) (bool, error) {
+	ipt, err := iptables.NewWithProtocol(getProtocolbyIp(apiVip))
+	if err != nil {
+		return false, err
+	}
+
+	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort)
+	if err != nil {
+		return false, err
+	}
+
+	exists, _ := ipt.Exists(table, chain, ruleSpec...)
+	return exists, nil
+}
