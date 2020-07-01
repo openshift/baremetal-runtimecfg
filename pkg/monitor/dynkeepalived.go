@@ -179,18 +179,17 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				log.Error("Failed to check for haproxy firewall rule")
 			} else {
 				filePath := "/var/run/keepalived/iptables-rule-exists"
+				_, err := os.Stat(filePath)
+				fileExists := !os.IsNotExist(err)
 				if ruleExists {
-					// FIXME: DRY this
-					_, err := os.Stat(filePath)
-					if os.IsNotExist(err) {
+					if !fileExists {
 						_, err := os.Create(filePath)
 						if err != nil {
 							log.WithFields(logrus.Fields{"path": filePath}).Error("Failed to create file")
 						}
 					}
 				} else {
-					_, err := os.Stat(filePath)
-					if ! os.IsNotExist(err) {
+					if fileExists {
 						err := os.Remove(filePath)
 						if err != nil {
 							log.WithFields(logrus.Fields{"path": filePath}).Error("Failed to remove file")
