@@ -31,7 +31,7 @@ func getProtocolbyIp(ipStr string) iptables.Protocol {
 	return iptables.ProtocolIPv6
 }
 
-func cleanHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
+func cleanHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) error {
 	ipt, err := iptables.NewWithProtocol(getProtocolbyIp(apiVip))
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func cleanHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
 	return nil
 }
 
-func ensureHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
+func ensureHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) error {
 	ipt, err := iptables.NewWithProtocol(getProtocolbyIp(apiVip))
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func ensureHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) error {
 	}
 }
 
-func checkHAProxyPreRoutingRule(apiVip string, apiPort, lbPort uint16) (bool, error) {
+func checkHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) (bool, error) {
 	ipt, err := iptables.NewWithProtocol(getProtocolbyIp(apiVip))
 	if err != nil {
 		return false, err
