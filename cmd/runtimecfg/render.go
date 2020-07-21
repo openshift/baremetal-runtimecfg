@@ -27,7 +27,7 @@ func init() {
 	renderCmd.Flags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")
 	renderCmd.Flags().IP("dns-vip", nil, "Virtual IP Address to reach an OpenShift node resolving DNS server")
 	renderCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
-	renderCmd.Flags().Uint16("lb-port", 9443, "Port where the API HAProxy LB will listen at")
+	renderCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen at")
 	renderCmd.Flags().Uint16("stat-port", 50000, "Port where the HAProxy stats API will listen at")
 	renderCmd.Flags().StringP("resolvconf-path", "r", "/etc/resolv.conf", "Optional path to a resolv.conf file to use to get upstream DNS servers")
 	rootCmd.AddCommand(renderCmd)
