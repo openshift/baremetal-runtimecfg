@@ -12,6 +12,7 @@ COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/monitor /u
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/dynkeepalived /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/corednsmonitor /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/* /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/ip*tables /usr/sbin/
 
 ENTRYPOINT ["/usr/bin/runtimecfg"]
 
