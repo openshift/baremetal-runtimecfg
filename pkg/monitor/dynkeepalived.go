@@ -98,6 +98,14 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
+	if exists, err := needLease(cfgPath); err != nil {
+		return err
+	} else if exists {
+		if err := leaseVIPs([]VIP{{"api", apiVip}, {"ingress", ingressVip}}); err != nil {
+			return err
+		}
+	}
+
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 

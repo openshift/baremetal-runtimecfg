@@ -213,7 +213,7 @@ func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, n
 	if dnsVip != nil {
 		vips = append(vips, dnsVip)
 	}
-	return getInterfaceAndNonVIPAddr(vips)
+	return GetInterfaceAndNonVIPAddr(vips)
 }
 
 func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err error) {

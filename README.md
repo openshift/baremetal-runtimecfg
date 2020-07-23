@@ -19,3 +19,14 @@ The available flags are:
 * --ingress-vip Virtual IP Address to reach the OpenShift Ingress Routers
 
 Note that you must pass at least one VIP for the VRRP interface to be found.
+
+## Test
+
+In order to run the tests you should have all these prerequisites:
+* make
+* docker
+* docker-compose
+
+```bash
+make test
+```
