@@ -17,6 +17,7 @@ require (
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.4.0 // indirect
+	github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
 	github.com/vishvananda/netlink v1.1.0
 	golang.org/x/net v0.0.0-20190628185345-da137c7871d7 // indirect
 	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45 // indirect

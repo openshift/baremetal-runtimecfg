@@ -7,10 +7,11 @@ fmt: ## Run go fmt against code
 
 .PHONY: test
 test: ## Run go test against code
-	docker-compose build $@ && docker-compose run --rm $@ make _$@
+	go test ./pkg/... ./cmd/...
 
-_test:
-	go test -v ./pkg/... ./cmd/...
+.PHONY: docker_test
+docker_test: ## Run test target on docker
+	docker-compose build test && docker-compose run --rm test make test
 
 .PHONY: vet
 vet: ## Run go vet against code

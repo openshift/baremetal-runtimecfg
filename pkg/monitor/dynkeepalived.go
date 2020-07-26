@@ -98,10 +98,15 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
+	clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
+	if err != nil {
+		return err
+	}
+
 	if exists, err := needLease(cfgPath); err != nil {
 		return err
 	} else if exists {
-		if err := leaseVIPs([]VIP{{"api", apiVip}, {"ingress", ingressVip}}); err != nil {
+		if err := leaseVIPs(clusterName, []VIP{{"api", apiVip}, {"ingress", ingressVip}}); err != nil {
 			return err
 		}
 	}

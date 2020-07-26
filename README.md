@@ -28,5 +28,5 @@ In order to run the tests you should have all these prerequisites:
 * docker-compose
 
 ```bash
-make test
+make docker_test
 ```

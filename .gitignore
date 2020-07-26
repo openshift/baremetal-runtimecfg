@@ -49,3 +49,6 @@ network_closure.sh
 /dynkeepalived
 /corednsmonitor
 /unicastipserver
+
+# testing generated files
+*dhcpd.leases

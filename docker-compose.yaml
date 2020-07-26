@@ -6,10 +6,28 @@ services:
       context: .
       dockerfile: Dockerfile.test
     cap_add:
-      - CAP_NET_ADMIN
+      - cap_net_admin
+      - cap_net_raw
     volumes:
       - ${PWD}:/src
       - ${HOME}/.cache/go-build:/go/pkg/mod
     working_dir: /src
     environment:
       - GOCACHE=/go/pkg/mod
+    depends_on:
+      - dhcpd
+    networks:
+      - dhcp
+
+  dhcpd:
+    image: networkboot/dhcpd
+    cap_add:
+      - cap_net_raw
+    volumes:
+      - ${PWD}/test/data:/data
+    networks:
+      - dhcp
+    command: eth0
+
+networks:
+  dhcp:
