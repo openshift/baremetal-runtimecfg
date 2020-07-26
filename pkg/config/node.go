@@ -184,7 +184,7 @@ func (c *Cluster) PopulateVRIDs() error {
 func GetBootstrapIP(apiVip string) (bootstrapIP string, err error) {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(apiVip, bootstrapIpServerPort), 10*time.Second)
 	if err != nil {
-		log.Infof("An error occurred on dial: %v", err)
+		log.Debugf("An error occurred on dial: %v", err)
 		return "", err
 	}
 	defer conn.Close()
@@ -214,6 +214,32 @@ func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, n
 		vips = append(vips, dnsVip)
 	}
 	return GetInterfaceAndNonVIPAddr(vips)
+}
+
+func IsUpgradeStillRunning(kubeconfigPath string) (error, bool) {
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return err, true
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err, true
+	}
+
+	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err != nil {
+		return err, true
+	}
+
+	for _, node := range nodes.Items {
+		if node.Annotations["machineconfiguration.openshift.io/desiredConfig"] != node.Annotations["machineconfiguration.openshift.io/currentConfig"] {
+			return nil, true
+		}
+	}
+
+	return nil, false
 }
 
 func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err error) {
