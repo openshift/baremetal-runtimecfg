@@ -2,22 +2,23 @@ package monitor
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/milosgajdos/tenus"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/syndtr/gocapability/capability"
+	"github.com/vishvananda/netlink"
 )
 
-const LeaseTime = 3 * time.Second
+const LeaseTime = 5 * time.Second
 
 var _ = Describe("lease_vip", func() {
 	var (
@@ -27,11 +28,12 @@ var _ = Describe("lease_vip", func() {
 		testIP    net.IP
 		testName  string
 		err       error
+		cfgPath   string
 	)
 
 	BeforeEach(func() {
-		if !hasCap(capability.CAP_NET_ADMIN) {
-			Skip("Must run with CAP_NET_ADMIN capability")
+		if !hasCap(capability.CAP_NET_ADMIN, capability.CAP_NET_RAW) {
+			Skip("Must run with capabilities: CAP_NET_ADMIN, CAP_NET_RAW")
 		}
 
 		host, _ := os.Hostname()
@@ -48,34 +50,38 @@ var _ = Describe("lease_vip", func() {
 			}
 		}
 
-		testName = uuid.New().String()[:4]
+		testName = generateUUID()[:4]
+
+		file, err := ioutil.TempFile("", "config")
+		Expect(err).ShouldNot(HaveOccurred())
+		cfgPath = file.Name()
 	})
 
 	Describe("leaseInterface", func() {
 		It("happy_flow", func() {
-			testIface, err = leaseInterface(testName, testIP)
+			testIface, err = leaseInterface(realIface.Name, testName)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 
 		It("different_names", func() {
-			testIface, err = leaseInterface(testName, testIP)
+			testIface, err = leaseInterface(realIface.Name, testName)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			iface2, err := leaseInterface(uuid.New().String()[:4], testIP)
+			iface2, err := leaseInterface(realIface.Name, generateUUID()[:4])
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(iface2.Name).ShouldNot(Equal(realIface.Name))
 			Expect(iface2.Name).ShouldNot(Equal(testIface.Name))
 			Expect(iface2.HardwareAddr).ShouldNot(Equal(realIface.HardwareAddr))
 			Expect(iface2.HardwareAddr).ShouldNot(Equal(testIface.HardwareAddr))
 
-			Expect(tenus.DeleteLink(iface2.Name)).ShouldNot(HaveOccurred())
+			deleteInterface(iface2.Name)
 		})
 
 		It("predefined_macvlan", func() {
-			testIface, err = leaseInterface(testName, testIP)
+			testIface, err = leaseInterface(realIface.Name, testName)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			iface2, err := leaseInterface(testName, testIP)
+			iface2, err := leaseInterface(realIface.Name, testName)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(iface2.Name).Should(Equal(testIface.Name))
 			Expect(iface2.HardwareAddr).Should(Equal(testIface.HardwareAddr))
@@ -84,74 +90,140 @@ var _ = Describe("lease_vip", func() {
 		AfterEach(func() {
 			Expect(testIface.Name).ShouldNot(Equal(realIface.Name))
 			Expect(testIface.HardwareAddr).ShouldNot(Equal(realIface.HardwareAddr))
+
+			iface, err := net.InterfaceByName(testName)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			// Create new interface without allocating an IP - That's keepalived responsibility
+			addrs, err := iface.Addrs()
+			Expect(iface.HardwareAddr).Should(Equal(testIface.HardwareAddr))
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(len(addrs)).Should(Equal(0))
 		})
 	})
 
 	Describe("leaseVIP", func() {
 		BeforeEach(func() {
-			Expect(leaseVIP(testName, testIP)).ShouldNot(HaveOccurred())
+			Expect(leaseVIP(cfgPath, realIface.Name, testName)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 		})
 
 		It("happy_flow", func() {
-			Expect(getLeaseInterface()).Should(Equal(fmt.Sprintf(leaseInterfaceTemplate, testName)))
-			Expect(getLeaseFixedAddress()).ShouldNot(BeEmpty())
+			Expect(getInterfaceFromLeaseFile(cfgPath, testName)).Should(Equal(testName))
+			Expect(getIPFromLeaseFile(cfgPath, testName)).ShouldNot(BeEmpty())
 		})
 
 		It("multiple_vips", func() {
 			for i := 2; i < 5; i++ {
-				Expect(leaseVIP(testName+strconv.Itoa(i), testIP)).ShouldNot(HaveOccurred())
+				Expect(leaseVIP(cfgPath, realIface.Name, testName+strconv.Itoa(i))).ShouldNot(HaveOccurred())
 			}
 
 			time.Sleep(LeaseTime)
 
 			for i := 2; i < 5; i++ {
-				Expect(tenus.DeleteLink(fmt.Sprintf(leaseInterfaceTemplate, testName+strconv.Itoa(i)))).ShouldNot(HaveOccurred())
+				deleteInterface(testName + strconv.Itoa(i))
 			}
 		})
 
 		It("different_mac_different_ip", func() {
-			ip := getLeaseFixedAddress()
+			ip := getIPFromLeaseFile(cfgPath, testName)
 
-			cleanEnv()
+			cleanEnv(cfgPath)
 
-			Expect(leaseVIP(uuid.New().String()[:4], testIP)).ShouldNot(HaveOccurred())
+			newName := generateUUID()[:4]
+			Expect(leaseVIP(cfgPath, realIface.Name, newName)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
-			Expect(getLeaseFixedAddress()).ShouldNot(Equal(ip))
+			Expect(getIPFromLeaseFile(cfgPath, newName)).ShouldNot(Equal(ip))
+			deleteInterface(newName)
 		})
 
 		It("same_mac_same_ip", func() {
-			ip := getLeaseFixedAddress()
+			ip := getIPFromLeaseFile(cfgPath, testName)
 
-			cleanEnv()
+			cleanEnv(cfgPath)
 
-			Expect(leaseVIP(testName, testIP)).ShouldNot(HaveOccurred())
+			Expect(leaseVIP(cfgPath, realIface.Name, testName)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
-			Expect(getLeaseFixedAddress()).Should(Equal(ip))
+			Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal(ip))
+		})
+
+		AfterEach(func() {
+			iface, err := net.InterfaceByName(testName)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			// Lease without allocating an IP - That's keepalived responsibility
+			addrs, err := iface.Addrs()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(len(addrs)).Should(Equal(0))
 		})
 	})
 
 	It("server_hardcoded_host", func() {
 		testName = "test"
-		Expect(leaseVIP(testName, testIP)).ShouldNot(HaveOccurred())
+		Expect(leaseVIP(cfgPath, realIface.Name, testName)).ShouldNot(HaveOccurred())
 
 		time.Sleep(LeaseTime)
-		Expect(getLeaseFixedAddress()).Should(Equal("172.21.0.55"))
+		Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal("172.99.0.55"))
+	})
+
+	Describe("leaseVIPs", func() {
+		It("happy_flow", func() {
+			clusterName := generateUUID()
+			vips := []VIP{
+				{"api", testIP},
+				{"ingress", testIP},
+			}
+			Expect(leaseVIPs(cfgPath, clusterName, vips)).ShouldNot(HaveOccurred())
+			time.Sleep(LeaseTime)
+
+			for _, vip := range vips {
+				Expect(getInterfaceFromLeaseFile(cfgPath, getInterfaceName(clusterName, vip.name))).Should(
+					Equal(getInterfaceName(clusterName, vip.name)))
+
+				deleteInterface(getInterfaceName(clusterName, vip.name))
+			}
+		})
+
+		It("cluster_long_name", func() {
+			clusterName := generateUUID()
+			vips := []VIP{
+				{generateUUID(), testIP},
+			}
+			Expect(leaseVIPs(cfgPath, clusterName, vips)).ShouldNot(HaveOccurred())
+			time.Sleep(LeaseTime)
+
+			for _, vip := range vips {
+				Expect(getInterfaceFromLeaseFile(cfgPath, getInterfaceName(clusterName, vip.name))).Should(
+					Equal(getInterfaceName(clusterName, vip.name)))
+
+				deleteInterface(getInterfaceName(clusterName, vip.name))
+			}
+		})
+
+		It("short_name", func() {
+			clusterName := generateUUID()[:1]
+			vips := []VIP{
+				{generateUUID()[:1], testIP},
+			}
+			Expect(leaseVIPs(cfgPath, clusterName, vips)).ShouldNot(HaveOccurred())
+			time.Sleep(LeaseTime)
+
+			for _, vip := range vips {
+				Expect(getInterfaceFromLeaseFile(cfgPath, getInterfaceName(clusterName, vip.name))).Should(
+					Equal(getInterfaceName(clusterName, vip.name)))
+
+				deleteInterface(getInterfaceName(clusterName, vip.name))
+			}
+		})
 	})
 
 	AfterEach(func() {
-		cleanEnv()
-
-		iface, err := net.InterfaceByName(fmt.Sprintf(leaseInterfaceTemplate, testName))
-		Expect(err).ShouldNot(HaveOccurred())
-
-		// Create new interface / lease without allocating an IP - That's keepalived responsibility
-		addrs, err := iface.Addrs()
-		Expect(err).ShouldNot(HaveOccurred())
-		Expect(len(addrs)).Should(Equal(0))
+		cleanEnv(cfgPath)
 
 		// Cleanup
-		_ = tenus.DeleteLink(testIface.Name)
+		if testIface != nil {
+			deleteInterface(testIface.Name)
+		}
 	})
 })
 
@@ -167,28 +239,38 @@ func hasCap(newCaps ...capability.Cap) bool {
 	return caps.Apply(capability.CAPS) == nil
 }
 
-func cleanEnv() {
+func deleteInterface(name string) {
+	if iface, err := netlink.LinkByName(name); err == nil {
+		Expect(netlink.LinkDel(iface)).ShouldNot(HaveOccurred())
+	}
+}
+
+func cleanEnv(cfgPath string) {
 	_ = getOutput("pkill dhclient || true")
-	_ = getOutput(fmt.Sprintf("rm -rf %s", leaseFile))
+	_ = getOutput(fmt.Sprintf("rm -rf %s", getLeaseFile(cfgPath, "*")))
 }
 
-func getLeaseFixedAddress() string {
-	return getOutput(fmt.Sprintf("cat %s | awk '$1==\"fixed-address\" {print $2}' | tr -d ';\n'", leaseFile))
+func generateUUID() string {
+	return getOutput("uuidgen")
 }
 
-func getLeaseInterface() string {
-	return getOutput(fmt.Sprintf("cat %s | awk '$1==\"interface\" {print $2}' | tr -d '\";\n'", leaseFile))
+func getIPFromLeaseFile(cfgPath, name string) string {
+	return getOutput(fmt.Sprintf("cat %s | awk '$1==\"fixed-address\" {print $2}' | tr -d ';'", getLeaseFile(cfgPath, name)))
+}
+
+func getInterfaceFromLeaseFile(cfgPath, name string) string {
+	return getOutput(fmt.Sprintf("cat %s | awk '$1==\"interface\" {print $2}' | tr -d '\";'", getLeaseFile(cfgPath, name)))
 }
 
 func getOutput(command string) string {
 	cmd := exec.Command("bash", "-c", command)
 	out, err := cmd.Output()
 	if err != nil {
-		log.Fatal(command, " : ", err)
+		log.Fatal(command, ": ", err)
 	}
 
 	// fmt.Println(cmd.Args)
-	return string(out)
+	return strings.TrimSpace(string(out))
 }
 
 func Test(t *testing.T) {

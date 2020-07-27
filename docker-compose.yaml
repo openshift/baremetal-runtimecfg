@@ -26,8 +26,13 @@ services:
     volumes:
       - ${PWD}/test/data:/data
     networks:
-      - dhcp
+      dhcp:
+        ipv4_address: 172.99.0.2
     command: eth0
 
 networks:
   dhcp:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.99.0.0/16

@@ -98,16 +98,24 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
-	clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
-	if err != nil {
-		return err
-	}
-
-	if exists, err := needLease(cfgPath); err != nil {
-		return err
-	} else if exists {
-		if err := leaseVIPs(clusterName, []VIP{{"api", apiVip}, {"ingress", ingressVip}}); err != nil {
-			return err
+	// Lease VIPS
+	// To avoid backwards compatability - Bad flow doesn't return an error
+	if clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath); err == nil {
+		if exists, err := needLease(cfgPath); err == nil && exists {
+			vips := []VIP{{"api", apiVip}, {"ingress", ingressVip}}
+			if err = leaseVIPs(cfgPath, clusterName, vips); err == nil {
+				log.WithFields(logrus.Fields{
+					"cfgPath":     cfgPath,
+					"clusterName": clusterName,
+					"vips":        vips,
+				}).Info("Leased VIPS successfully")
+			} else {
+				log.WithFields(logrus.Fields{
+					"cfgPath":     cfgPath,
+					"clusterName": clusterName,
+					"vips":        vips,
+				}).WithError(err).Error("Failed to lease VIPS")
+			}
 		}
 	}
 

@@ -22,6 +22,10 @@ Note that you must pass at least one VIP for the VRRP interface to be found.
 
 ## Test
 
+### Run on docker (recommended)
+
+Running tests inside docker are consistet between machines and it keeps the host environment clean.
+
 In order to run the tests you should have all these prerequisites:
 * make
 * docker
@@ -29,4 +33,15 @@ In order to run the tests you should have all these prerequisites:
 
 ```bash
 make docker_test
+```
+
+### Run locally on host
+
+There are some tests that require user capabilities (cap_net_admin, cap_net_raw).
+In case the user doesn't have these capabilities - The tests would be skipped.
+
+Pay attention: This tests might change the machine networking.
+
+```bash
+make test
 ```

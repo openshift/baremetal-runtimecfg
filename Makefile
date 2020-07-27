@@ -7,7 +7,7 @@ fmt: ## Run go fmt against code
 
 .PHONY: test
 test: ## Run go test against code
-	go test ./pkg/... ./cmd/...
+	go test -v ./pkg/... ./cmd/...
 
 .PHONY: docker_test
 docker_test: ## Run test target on docker

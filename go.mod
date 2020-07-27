@@ -7,9 +7,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/ghodss/yaml v1.0.0
 	github.com/google/go-cmp v0.3.0
-	github.com/google/uuid v1.1.1
 	github.com/imdario/mergo v0.3.7 // indirect
-	github.com/milosgajdos/tenus v0.0.0-20200407174313-f075bef9ab28
 	github.com/onsi/ginkgo v1.8.0
 	github.com/onsi/gomega v1.5.0
 	github.com/openshift/installer v0.16.1
