@@ -12,6 +12,7 @@ test: ## Run go test against code
 .PHONY: docker_test
 docker_test: ## Run test target on docker
 	docker-compose build test && docker-compose run --rm test make test
+	-rm -rf test/data/dhcpd.leases*
 
 .PHONY: vet
 vet: ## Run go vet against code

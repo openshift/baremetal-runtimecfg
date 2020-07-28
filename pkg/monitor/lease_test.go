@@ -177,10 +177,10 @@ var _ = Describe("lease_vip", func() {
 			time.Sleep(LeaseTime)
 
 			for _, vip := range vips {
-				Expect(getInterfaceFromLeaseFile(cfgPath, getInterfaceName(clusterName, vip.name))).Should(
-					Equal(getInterfaceName(clusterName, vip.name)))
+				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.name))).Should(
+					Equal(GetClusterInterfaceName(clusterName, vip.name)))
 
-				deleteInterface(getInterfaceName(clusterName, vip.name))
+				deleteInterface(GetClusterInterfaceName(clusterName, vip.name))
 			}
 		})
 
@@ -193,10 +193,10 @@ var _ = Describe("lease_vip", func() {
 			time.Sleep(LeaseTime)
 
 			for _, vip := range vips {
-				Expect(getInterfaceFromLeaseFile(cfgPath, getInterfaceName(clusterName, vip.name))).Should(
-					Equal(getInterfaceName(clusterName, vip.name)))
+				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.name))).Should(
+					Equal(GetClusterInterfaceName(clusterName, vip.name)))
 
-				deleteInterface(getInterfaceName(clusterName, vip.name))
+				deleteInterface(GetClusterInterfaceName(clusterName, vip.name))
 			}
 		})
 
@@ -209,10 +209,10 @@ var _ = Describe("lease_vip", func() {
 			time.Sleep(LeaseTime)
 
 			for _, vip := range vips {
-				Expect(getInterfaceFromLeaseFile(cfgPath, getInterfaceName(clusterName, vip.name))).Should(
-					Equal(getInterfaceName(clusterName, vip.name)))
+				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.name))).Should(
+					Equal(GetClusterInterfaceName(clusterName, vip.name)))
 
-				deleteInterface(getInterfaceName(clusterName, vip.name))
+				deleteInterface(GetClusterInterfaceName(clusterName, vip.name))
 			}
 		})
 	})
@@ -269,7 +269,6 @@ func getOutput(command string) string {
 		log.Fatal(command, ": ", err)
 	}
 
-	// fmt.Println(cmd.Args)
 	return strings.TrimSpace(string(out))
 }
 

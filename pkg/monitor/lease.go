@@ -14,11 +14,11 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-const monitorConf = "unsupported-monitor.conf"
+const MonitorConfFileName = "unsupported-monitor.conf"
 const leaseFile = "lease-%s"
 const macAddressBytes = 6
 
-var macPrefixQumranet = [...]byte{0x00, 0x1A, 0x4A}
+var MacPrefixQumranet = [...]byte{0x00, 0x1A, 0x4A}
 
 type VIP struct {
 	name string
@@ -26,32 +26,32 @@ type VIP struct {
 }
 
 func needLease(cfgPath string) (bool, error) {
-	monitorConfFile := filepath.Join(filepath.Dir(cfgPath), monitorConf)
+	monitorConfPath := filepath.Join(filepath.Dir(cfgPath), MonitorConfFileName)
 
-	_, err := os.Stat(monitorConfFile)
+	_, err := os.Stat(monitorConfPath)
 
 	if err == nil {
 		log.WithFields(logrus.Fields{
-			"file": monitorConfFile,
+			"file": monitorConfPath,
 		}).Info("Monitor conf file exist")
 		return true, nil
 	}
 	if os.IsNotExist(err) {
 		log.WithFields(logrus.Fields{
-			"file": monitorConfFile,
+			"file": monitorConfPath,
 		}).Info("Monitor conf file doesn't exist")
 		return false, nil
 	}
 
 	log.WithFields(logrus.Fields{
-		"file": monitorConfFile,
+		"file": monitorConfPath,
 	}).WithError(err).Error("Failed to get file status")
 	return false, err
 }
 
 func leaseVIPs(cfgPath string, clusterName string, vips []VIP) error {
 	for _, vip := range vips {
-		vipFullName := getInterfaceName(clusterName, vip.name)
+		vipFullName := GetClusterInterfaceName(clusterName, vip.name)
 
 		vipMasterIface, _, err := config.GetInterfaceAndNonVIPAddr([]net.IP{vip.ip})
 		if err != nil {
@@ -93,7 +93,7 @@ func leaseVIP(cfgPath, masterDevice, name string) error {
 }
 
 func leaseInterface(masterDevice string, name string) (*net.Interface, error) {
-	mac := generateMac(macPrefixQumranet[:], name)
+	mac := GenerateMac(MacPrefixQumranet[:], name)
 
 	// Check if already exist
 	if macVlanIfc, err := net.InterfaceByName(name); err == nil {
@@ -158,16 +158,16 @@ func leaseInterface(masterDevice string, name string) (*net.Interface, error) {
 	return macVlanIfc, nil
 }
 
-func generateMac(prefix []byte, noise string) (mac net.HardwareAddr) {
+func GenerateMac(prefix []byte, key string) (mac net.HardwareAddr) {
 	mac = append(net.HardwareAddr{}, prefix...)
 
-	hash := utils.PearsonHash([]byte(noise), int(math.Max(0, float64(macAddressBytes-len(prefix)))))
+	hash := utils.PearsonHash([]byte(key), int(math.Max(0, float64(macAddressBytes-len(prefix)))))
 	mac = append(mac, hash...)
 
 	return
 }
 
-func getInterfaceName(clusterName, vipName string) string {
+func GetClusterInterfaceName(clusterName, vipName string) string {
 	vipFullName := fmt.Sprintf("%s-%s", clusterName, vipName)
 
 	// Takes the last `interfaceMaxSize` bytes of vipFullName

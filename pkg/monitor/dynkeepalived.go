@@ -99,24 +99,34 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	var configChangeCtr uint8 = 0
 
 	// Lease VIPS
-	// To avoid backwards compatability - Bad flow doesn't return an error
-	if clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath); err == nil {
-		if exists, err := needLease(cfgPath); err == nil && exists {
-			vips := []VIP{{"api", apiVip}, {"ingress", ingressVip}}
-			if err = leaseVIPs(cfgPath, clusterName, vips); err == nil {
-				log.WithFields(logrus.Fields{
-					"cfgPath":     cfgPath,
-					"clusterName": clusterName,
-					"vips":        vips,
-				}).Info("Leased VIPS successfully")
-			} else {
-				log.WithFields(logrus.Fields{
-					"cfgPath":     cfgPath,
-					"clusterName": clusterName,
-					"vips":        vips,
-				}).WithError(err).Error("Failed to lease VIPS")
-			}
+	if exists, err := needLease(cfgPath); err != nil {
+		return err
+	} else if exists {
+		clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
+
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"kubeconfigPath":    kubeconfigPath,
+				"clusterConfigPath": clusterConfigPath,
+			}).WithError(err).Error("Failed to get cluster name")
+			return err
 		}
+
+		vips := []VIP{{"api", apiVip}, {"ingress", ingressVip}}
+		if err = leaseVIPs(cfgPath, clusterName, vips); err != nil {
+			log.WithFields(logrus.Fields{
+				"cfgPath":     cfgPath,
+				"clusterName": clusterName,
+				"vips":        vips,
+			}).WithError(err).Error("Failed to lease VIPS")
+			return err
+		}
+
+		log.WithFields(logrus.Fields{
+			"cfgPath":     cfgPath,
+			"clusterName": clusterName,
+			"vips":        vips,
+		}).Info("Leased VIPS successfully")
 	}
 
 	signals := make(chan os.Signal, 1)

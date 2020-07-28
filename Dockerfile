@@ -8,6 +8,9 @@ RUN GO111MODULE=on go build --mod=vendor cmd/monitor/monitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/unicastipserver/unicastipserver.go
 
 FROM registry.access.redhat.com/ubi8/ubi:latest
+
+RUN yum install -y dhcp-client && yum clean all
+
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/runtimecfg /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/monitor /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/dynkeepalived /usr/bin
@@ -17,8 +20,6 @@ COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/* 
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/ip*tables /usr/sbin/
 
 ENTRYPOINT ["/usr/bin/runtimecfg"]
-
-RUN yum install -y dhcp-client && yum clean all
 
 LABEL io.k8s.display-name="baremetal-runtimecfg" \
       io.k8s.description="Retrieves Node and Cluster information for baremetal network config" \
