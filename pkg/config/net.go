@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
+func GetInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	if len(vips) < 1 {
 		return vipIface, nonVipAddr, fmt.Errorf("At least one VIP needs to be fed to this function")
 	}

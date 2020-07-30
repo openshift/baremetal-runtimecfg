@@ -213,7 +213,7 @@ func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, n
 	if dnsVip != nil {
 		vips = append(vips, dnsVip)
 	}
-	return getInterfaceAndNonVIPAddr(vips)
+	return GetInterfaceAndNonVIPAddr(vips)
 }
 
 func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err error) {
@@ -244,15 +244,11 @@ func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err e
 }
 
 func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
-	// Try cluster-config.yml first
-	clusterName, clusterDomain, err := getClusterConfigClusterNameAndDomain(clusterConfigPath)
+	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
-		// We are using kubeconfig as a fallback for this
-		clusterName, clusterDomain, err = GetKubeconfigClusterNameAndDomain(kubeconfigPath)
-		if err != nil {
-			return node, err
-		}
+		return node, err
 	}
+
 	node.Cluster.Name = clusterName
 	node.Cluster.Domain = clusterDomain
 
@@ -418,4 +414,15 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 		"config": config,
 	}).Debug("Config for LB configuration retrieved")
 	return config, nil
+}
+
+func GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath string) (clusterName string, clusterDomain string, err error) {
+	// Try cluster-config.yml first
+	clusterName, clusterDomain, err = getClusterConfigClusterNameAndDomain(clusterConfigPath)
+	if err != nil {
+		// We are using kubeconfig as a fallback for this
+		clusterName, clusterDomain, err = GetKubeconfigClusterNameAndDomain(kubeconfigPath)
+	}
+
+	return
 }
