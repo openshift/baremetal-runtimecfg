@@ -88,6 +88,7 @@ func leaseVIP(cfgPath, masterDevice, name string) error {
 
 	cmd := exec.Command("dhclient", "-d", "--no-pid", "-sf", "/bin/true",
 		"-lf", getLeaseFile(cfgPath, name), "-v", iface.Name, "-H", name)
+	cmd.Stderr = os.Stderr
 
 	return cmd.Start()
 }
