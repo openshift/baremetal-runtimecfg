@@ -91,6 +91,12 @@ var _ = Describe("lease_vip", func() {
 			Expect(testIface.Name).ShouldNot(Equal(realIface.Name))
 			Expect(testIface.HardwareAddr).ShouldNot(Equal(realIface.HardwareAddr))
 
+			link, err := netlink.LinkByName(testIface.Name)
+			Expect(err).ShouldNot(HaveOccurred())
+			macvlan, ok := link.(*netlink.Macvlan)
+			Expect(ok).Should(BeTrue())
+			Expect(macvlan.Mode).Should(Equal(netlink.MACVLAN_MODE_PRIVATE))
+
 			iface, err := net.InterfaceByName(testName)
 			Expect(err).ShouldNot(HaveOccurred())
 

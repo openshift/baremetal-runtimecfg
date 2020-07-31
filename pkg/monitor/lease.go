@@ -118,7 +118,7 @@ func leaseInterface(masterDevice string, name string) (*net.Interface, error) {
 
 	mv := &netlink.Macvlan{
 		LinkAttrs: linkAttrs,
-		Mode:      netlink.MACVLAN_MODE_BRIDGE,
+		Mode:      netlink.MACVLAN_MODE_PRIVATE,
 	}
 
 	// Create interface
