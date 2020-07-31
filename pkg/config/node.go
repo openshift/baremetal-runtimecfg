@@ -352,6 +352,14 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	node.Cluster.VIPNetmask = prefix
 	node.VRRPInterface = vipIface.Name
 
+	// We can't populate this with GetLBConfig because in many cases the
+	// backends won't be available yet.
+	node.LBConfig = ApiLBConfig{
+		ApiPort:  apiPort,
+		LbPort:   lbPort,
+		StatPort: statPort,
+	}
+
 	return node, err
 }
 

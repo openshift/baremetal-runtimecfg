@@ -34,6 +34,22 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	}
 	defer renderFile.Close()
 
+	// Make sure we propagate any special permissions
+	templateStat, err := os.Stat(templatePath)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"path": templatePath,
+		}).Error("Failed to stat template")
+		return err
+	}
+	err = os.Chmod(renderPath, templateStat.Mode())
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"path": renderPath,
+		}).Error("Failed to set permissions on file")
+		return err
+	}
+
 	log.WithFields(logrus.Fields{
 		"path": renderPath,
 	}).Info("Runtimecfg rendering template")

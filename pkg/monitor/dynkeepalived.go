@@ -26,6 +26,7 @@ const (
 	userModeUpdateFilepath                     = "/etc/keepalived/monitor-user.conf"
 	modeUpdateIntervalInSec      time.Duration = 600
 	processingTimeInSec          uint16        = 30
+	iptablesFilePath                           = "/var/run/keepalived/iptables-rule-exists"
 )
 
 var (
@@ -186,7 +187,7 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var newConfig config.Node
 	var configChangeCtr uint8 = 0
@@ -348,6 +349,30 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				configChangeCtr = 0
 			}
 			prevConfig = &newConfig
+
+			// Signal to keepalived whether the haproxy firewall rule is in place
+			ruleExists, err := checkHAProxyFirewallRules(apiVip.String(), apiPort, lbPort)
+			if err != nil {
+				log.Error("Failed to check for haproxy firewall rule")
+			} else {
+				_, err := os.Stat(iptablesFilePath)
+				fileExists := !os.IsNotExist(err)
+				if ruleExists {
+					if !fileExists {
+						_, err := os.Create(iptablesFilePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to create file")
+						}
+					}
+				} else {
+					if fileExists {
+						err := os.Remove(iptablesFilePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to remove file")
+						}
+					}
+				}
+			}
 			time.Sleep(interval)
 		}
 	}
