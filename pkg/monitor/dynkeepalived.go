@@ -26,7 +26,7 @@ const (
 	userModeUpdateFilepath                     = "/etc/keepalived/monitor-user.conf"
 	modeUpdateIntervalInSec      time.Duration = 600
 	processingTimeInSec          uint16        = 30
-  iptablesFilePath                           = "/var/run/keepalived/iptables-rule-exists"
+	iptablesFilePath                           = "/var/run/keepalived/iptables-rule-exists"
 )
 
 var (
