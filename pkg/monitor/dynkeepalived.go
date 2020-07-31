@@ -9,23 +9,31 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 	"github.com/sirupsen/logrus"
 )
 
-const keepalivedControlSock = "/var/run/keepalived/keepalived.sock"
-const cfgKeepalivedChangeThreshold uint8 = 3
-const dummyPortNum uint16 = 123
-const unicastPatternInCfgFile = "unicast_peer"
-const iptablesFilePath = "/var/run/keepalived/iptables-rule-exists"
-
-var (
-	g_BootstrapIP string
+const (
+	keepalivedControlSock                      = "/var/run/keepalived/keepalived.sock"
+	cfgKeepalivedChangeThreshold uint8         = 3
+	dummyPortNum                 uint16        = 123
+	unicastPatternInCfgFile                    = "unicast_peer"
+	modeUpdateFilepath                         = "/etc/keepalived/monitor.conf"
+	userModeUpdateFilepath                     = "/etc/keepalived/monitor-user.conf"
+	modeUpdateIntervalInSec      time.Duration = 600
+	processingTimeInSec          uint16        = 30
+  iptablesFilePath                           = "/var/run/keepalived/iptables-rule-exists"
 )
 
-func getEnabledUnicastFromFile(cfgPath string) (error, bool) {
+var (
+	gBootstrapIP string
+)
+
+func getActualMode(cfgPath string) (error, bool) {
 	enableUnicast := false
 	_, err := os.Stat(cfgPath)
 	if os.IsNotExist(err) {
@@ -51,7 +59,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 		return
 	}
 	retrieveBootstrapIpAddr(newConfig.Cluster.APIVIP)
-	newConfig.BootstrapIP = g_BootstrapIP
+	newConfig.BootstrapIP = gBootstrapIP
 
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
 	if err != nil {
@@ -81,26 +89,143 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 func retrieveBootstrapIpAddr(apiVip string) {
 	var err error
 
-	if g_BootstrapIP != "" {
+	if gBootstrapIP != "" {
 		return
 	}
 	// we don't need to read the bootstrap IP address for bootstrap node
 	if os.Getenv("IS_BOOTSTRAP") == "yes" {
-		g_BootstrapIP = ""
+		gBootstrapIP = ""
 		return
 	}
-	g_BootstrapIP, err = config.GetBootstrapIP(apiVip)
+	gBootstrapIP, err = config.GetBootstrapIP(apiVip)
 	if err != nil {
-		log.Warnf("Could not retrieve bootstrap IP: %v", err)
+		log.Debugf("Could not retrieve bootstrap IP: %v", err)
+	}
+}
+
+type modeUpdateInfo struct {
+	Mode string
+	Time time.Time
+}
+
+func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
+	enableUnicast := false
+	updateRequired := false
+	desiredModeInfo := modeUpdateInfo{}
+	filePath := userModeUpdateFilepath
+
+	// userModeUpdateFilepath has higher priority than modeUpdateFilepath
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		filePath = modeUpdateFilepath
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return updateRequired, desiredModeInfo
+		}
+	}
+
+	yamlFile, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		log.Warnf("Could not ReadFile %s", filePath)
+		return updateRequired, desiredModeInfo
+	}
+	if err = yaml.Unmarshal(yamlFile, &desiredModeInfo); err != nil {
+		log.Warnf("Could not parse file content %s", yamlFile)
+		return updateRequired, desiredModeInfo
+	}
+	if desiredModeInfo.Mode == "unicast" {
+		enableUnicast = true
+	}
+	err, curEnableUnicast := getActualMode(cfgPath)
+	if err == nil && curEnableUnicast != enableUnicast {
+		updateRequired = true
+	}
+	return updateRequired, desiredModeInfo
+}
+
+func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh chan modeUpdateInfo) {
+
+	// create Ticker that will run every round modeUpdateIntervalInSec
+	nextTickTime := time.Now().Add((modeUpdateIntervalInSec / 2) * time.Second).Round(modeUpdateIntervalInSec * time.Second)
+	time.Sleep(time.Until(nextTickTime))
+	ticker := time.NewTicker(modeUpdateIntervalInSec * time.Second)
+	defer ticker.Stop()
+
+	for {
+
+		select {
+		case tickerTime := <-ticker.C:
+
+			updateRequired, desiredModeInfo := isModeUpdateNeeded(cfgPath)
+			if !updateRequired {
+				continue
+			}
+			log.WithFields(logrus.Fields{
+				"desiredModeInfo.Mode": desiredModeInfo.Mode,
+				"tickerTime":           tickerTime,
+			}).Info("Update Mode request detected, verify that upgrade process completed")
+
+			// before applying mode update we should verify that upgrade process completed.
+			err, upgradeRunning := config.IsUpgradeStillRunning(kubeconfigPath)
+			if err != nil || upgradeRunning {
+				log.WithFields(logrus.Fields{
+					"err":            err,
+					"upgradeRunning": upgradeRunning,
+				}).Info("Failed to retrieve upgrade status or Upgrade still running")
+				continue
+			}
+			// Ticker being called every round 10Min (e.g: 14:50, 15:00), the calculated time for mode update is: next round 5 minutes.
+			// so, for 14:50, we'd do it at 14:55 and for 15:00 we'd do it at 15:05
+			desiredModeInfo.Time = time.Now().Add((modeUpdateIntervalInSec / 2) * time.Second).Round((modeUpdateIntervalInSec / 2) * time.Second)
+			log.WithFields(logrus.Fields{
+				"desiredModeInfo.Time": desiredModeInfo.Time,
+			}).Info("Planned time for Mode update")
+
+			timeoutInSec := time.Duration((time.Until(desiredModeInfo.Time).Seconds() - (float64)(processingTimeInSec)))
+			// sleep until processingTimeInSec seconds before planned time
+			time.Sleep(timeoutInSec * time.Second)
+			updateModeCh <- desiredModeInfo
+		}
 	}
 }
 
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
+	var newConfig config.Node
 	var configChangeCtr uint8 = 0
+
+	// Lease VIPS
+	if exists, err := needLease(cfgPath); err != nil {
+		return err
+	} else if exists {
+		clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
+
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"kubeconfigPath":    kubeconfigPath,
+				"clusterConfigPath": clusterConfigPath,
+			}).WithError(err).Error("Failed to get cluster name")
+			return err
+		}
+
+		vips := []VIP{{"api", apiVip}, {"ingress", ingressVip}}
+		if err = leaseVIPs(cfgPath, clusterName, vips); err != nil {
+			log.WithFields(logrus.Fields{
+				"cfgPath":     cfgPath,
+				"clusterName": clusterName,
+				"vips":        vips,
+			}).WithError(err).Error("Failed to lease VIPS")
+			return err
+		}
+
+		log.WithFields(logrus.Fields{
+			"cfgPath":     cfgPath,
+			"clusterName": clusterName,
+			"vips":        vips,
+		}).Info("Leased VIPS successfully")
+	}
 
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
+	updateModeCh := make(chan modeUpdateInfo, 1)
 
 	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGINT)
@@ -108,6 +233,8 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		<-signals
 		done <- true
 	}()
+
+	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh)
 
 	conn, err := net.Dial("unix", keepalivedControlSock)
 	if err != nil {
@@ -118,19 +245,68 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		select {
 		case <-done:
 			return nil
-		default:
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+		case desiredModeInfo := <-updateModeCh:
+
+			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
+			log.WithFields(logrus.Fields{
+				"newConfig.EnableUnicast": newConfig.EnableUnicast,
+				"desiredModeInfo.Mode":    desiredModeInfo.Mode,
+				"desiredModeInfo.Time":    desiredModeInfo.Time,
+			}).Info("Update Mode from newConfig.EnableUnicast to desiredModeInfo.Mode")
+
+			if desiredModeInfo.Mode == "unicast" {
+				newConfig.EnableUnicast = true
+			} else {
+				newConfig.EnableUnicast = false
+			}
+			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+
+			log.WithFields(logrus.Fields{
+				"curConfig": newConfig,
+			}).Info("Mode Update config change")
+
+			err = render.RenderFile(cfgPath, templatePath, newConfig)
+			if err != nil {
+				log.WithFields(logrus.Fields{
+					"config": newConfig,
+				}).Error("Failed to render Keepalived configuration")
+				return err
+			}
+
+			time.Sleep(time.Until(desiredModeInfo.Time))
+			log.WithFields(logrus.Fields{
+				"curTime": time.Now(),
+			}).Info("After sleep, before sending reload request ")
+
+			_, err = conn.Write([]byte("reload\n"))
+			if err != nil {
+				log.WithFields(logrus.Fields{
+					"socket": keepalivedControlSock,
+				}).Error("Failed to write reload to Keepalived container control socket")
+				return err
+			}
+
+			curConfig = &newConfig
+			configChangeCtr = 0
+			appliedConfig = curConfig
+
+		default:
+			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			if err != nil {
+				return err
+			}
+
 			//In upgrade flow, we should first continue with the same mode (unicast or multicast) as currently configured in keepalived.conf file
-			err, enableUnicastFromFile := getEnabledUnicastFromFile(cfgPath)
-			if err == nil && newConfig.EnableUnicast != enableUnicastFromFile {
+			err, curEnableUnicast := getActualMode(cfgPath)
+			if err == nil && newConfig.EnableUnicast != curEnableUnicast {
 				log.WithFields(logrus.Fields{
 					"newConfig.EnableUnicast": newConfig.EnableUnicast,
-					"enableUnicastFromFile":   enableUnicastFromFile,
-				}).Info("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
-				newConfig.EnableUnicast = enableUnicastFromFile
+					"curEnableUnicast":        curEnableUnicast,
+				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
+				newConfig.EnableUnicast = curEnableUnicast
 			}
 			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
 			curConfig = &newConfig

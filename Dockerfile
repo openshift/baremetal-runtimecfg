@@ -7,7 +7,10 @@ RUN GO111MODULE=on go build --mod=vendor cmd/corednsmonitor/corednsmonitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/monitor/monitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/unicastipserver/unicastipserver.go
 
-FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
+FROM registry.access.redhat.com/ubi8/ubi:latest
+
+RUN yum install -y dhcp-client && yum clean all
+
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/runtimecfg /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/monitor /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/dynkeepalived /usr/bin
