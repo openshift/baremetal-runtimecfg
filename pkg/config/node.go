@@ -352,14 +352,6 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	node.Cluster.VIPNetmask = prefix
 	node.VRRPInterface = vipIface.Name
 
-	// We can't populate this with GetLBConfig because in many cases the
-	// backends won't be available yet.
-	node.LBConfig = ApiLBConfig{
-		ApiPort:  apiPort,
-		LbPort:   lbPort,
-		StatPort: statPort,
-	}
-
 	return node, err
 }
 
@@ -428,7 +420,7 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
 	backends, err := getSortedBackends(kubeconfigPath)
-	if err != nil {
+	if os.Getenv("IS_BOOTSTRAP") == "no" && err != nil {
 		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
 		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
 		backends, err = getSortedBackends("")

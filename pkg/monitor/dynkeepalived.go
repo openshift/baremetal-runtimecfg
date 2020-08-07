@@ -61,9 +61,11 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 	retrieveBootstrapIpAddr(newConfig.Cluster.APIVIP)
 	newConfig.BootstrapIP = gBootstrapIP
 
-	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
-	if err != nil {
-		log.Warnf("Could not retrieve ingress config: %v", err)
+	if os.Getenv("IS_BOOTSTRAP") == "no" {
+		newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
+		if err != nil {
+			log.Warnf("Could not retrieve ingress config: %v", err)
+		}
 	}
 
 	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(newConfig.Cluster.APIVIP))
@@ -247,6 +249,10 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			return nil
 		case desiredModeInfo := <-updateModeCh:
 
+			log.WithFields(logrus.Fields{
+				"curTime": time.Now(),
+			}).Info("YOBO: main loop Update mode change ")
+
 			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
@@ -293,11 +299,25 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			configChangeCtr = 0
 			appliedConfig = curConfig
 
+			log.WithFields(logrus.Fields{
+				"curTime": time.Now(),
+			}).Info("YOBO: main loop EOF Update mode change ")
+
 		default:
+
+			log.WithFields(logrus.Fields{
+				"curTime": time.Now(),
+			}).Info("YOBO: main loop default start  ")
+
 			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
+
+			log.WithFields(logrus.Fields{
+				"curTime":   time.Now(),
+				"newConfig": newConfig,
+			}).Info("YOBO: main loop default after get config   ")
 
 			//In upgrade flow, we should first continue with the same mode (unicast or multicast) as currently configured in keepalived.conf file
 			err, curEnableUnicast := getActualMode(cfgPath)
@@ -309,6 +329,11 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				newConfig.EnableUnicast = curEnableUnicast
 			}
 			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			log.WithFields(logrus.Fields{
+				"curTime":   time.Now(),
+				"newConfig": newConfig,
+			}).Info("YOBO: main loop default after updateUnicastConfig   ")
+
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
@@ -350,6 +375,11 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			}
 			prevConfig = &newConfig
 
+			log.WithFields(logrus.Fields{
+				"curTime":   time.Now(),
+				"newConfig": newConfig,
+			}).Info("YOBO: main loop default before haproxy rule  ")
+
 			// Signal to keepalived whether the haproxy firewall rule is in place
 			ruleExists, err := checkHAProxyFirewallRules(apiVip.String(), apiPort, lbPort)
 			if err != nil {
@@ -373,6 +403,11 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 					}
 				}
 			}
+			log.WithFields(logrus.Fields{
+				"curTime":   time.Now(),
+				"newConfig": newConfig,
+			}).Info("YOBO: main loop default before sleep   ")
+
 			time.Sleep(interval)
 		}
 	}
