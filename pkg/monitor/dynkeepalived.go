@@ -30,7 +30,8 @@ const (
 )
 
 var (
-	gBootstrapIP string
+	gBootstrapIP         string
+	gFirstTimeMasterRuns bool = true
 )
 
 func getActualMode(cfgPath string) (error, bool) {
@@ -100,6 +101,15 @@ func retrieveBootstrapIpAddr(apiVip string) {
 	gBootstrapIP, err = config.GetBootstrapIP(apiVip)
 	if err != nil {
 		log.Debugf("Could not retrieve bootstrap IP: %v", err)
+	} else {
+		if gFirstTimeMasterRuns {
+			log.WithFields(logrus.Fields{
+				"gFirstTimeMasterRuns": gFirstTimeMasterRuns,
+			}).Info("First time master runs, workaround : delay master keepalived init for 420 Seconds  ")
+
+			time.Sleep(420 * time.Second)
+			gFirstTimeMasterRuns = false
+		}
 	}
 }
 
@@ -191,6 +201,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var newConfig config.Node
 	var configChangeCtr uint8 = 0
+	var firstTime bool = false
 
 	// Lease VIPS
 	if exists, err := needLease(cfgPath); err != nil {
@@ -327,6 +338,15 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 						"curConfig": *curConfig,
 					}).Info("Apply config change")
 
+					if os.Getenv("IS_BOOTSTRAP") == "yes" {
+						_, err := os.Stat(cfgPath)
+						if os.IsNotExist(err) {
+							firstTime = true
+						} else {
+							firstTime = false
+						}
+					}
+
 					err = render.RenderFile(cfgPath, templatePath, newConfig)
 					if err != nil {
 						log.WithFields(logrus.Fields{
@@ -344,6 +364,14 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 					}
 					configChangeCtr = 0
 					appliedConfig = curConfig
+
+					if firstTime {
+						log.WithFields(logrus.Fields{
+							"firstTime": firstTime,
+						}).Info("Bootstrap Firsttime update cfg file , exiting ")
+						time.Sleep(45 * time.Second)
+						return nil
+					}
 				}
 			} else {
 				configChangeCtr = 0
