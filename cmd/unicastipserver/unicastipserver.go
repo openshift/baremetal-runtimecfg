@@ -30,7 +30,7 @@ func main() {
 				return err
 			}
 
-			return monitor.UnicastIPServer(apiVip, ingressVip, dnsVip, unicastipServerPort)
+			return monitor.UnicastIPServer(apiVip, ingressVip, dnsVip, unicastipServerPort, nil)
 		},
 	}
 

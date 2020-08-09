@@ -24,7 +24,7 @@ import (
 )
 
 const localhostKubeApiServerUrl string = "https://localhost:6443"
-const bootstrapIpServerPort string = "64444"
+const bootstrapIpServerPort string = "64445"
 
 var log = logrus.New()
 
