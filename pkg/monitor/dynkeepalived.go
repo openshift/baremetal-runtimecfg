@@ -97,11 +97,22 @@ func retrieveBootstrapIpAddr(apiVip string) {
 		gBootstrapIP = ""
 		return
 	}
-	retrievedIP, err := config.GetBootstrapIP(apiVip)
-	if err != nil {
-		log.Debugf("Could not retrieve bootstrap IP: %v", err)
-	} else {
-		gBootstrapIP = retrievedIP
+	if gBootstrapIP != "" {
+		// Test if bootstrap is still up and running
+		retrievedIP, err := config.GetBootstrapIP(gBootstrapIP)
+		if err != nil { // Let's clear the bootstrap, since it is probably gone
+			gBootstrapIP = ""
+			log.Debugf("Bootstrap unicast IP server no longer listening at: %s", gBootstrapIP)
+		}
+		log.Debugf("Bootstrap unicast IP server still listening at: %s", gBootstrapIP)
+	} else { // Get the bootstrap IP
+		retrievedIP, err := config.GetBootstrapIP(apiVip)
+		if err != nil {
+			log.Debugf("Could not retrieve bootstrap IP: %v", err)
+		} else {
+			log.Debugf("Found Bootstrap unicast IP server listening at: %s", retrievedIP)
+			gBootstrapIP = retrievedIP
+		}
 	}
 }
 
