@@ -189,7 +189,6 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
-	var newConfig config.Node
 	var configChangeCtr uint8 = 0
 
 	// Lease VIPS
@@ -247,7 +246,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			return nil
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -294,7 +293,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			appliedConfig = curConfig
 
 		default:
-			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
