@@ -52,7 +52,7 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
-func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config.Node) {
+func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) {
 	var err error
 
 	if !newConfig.EnableUnicast {
@@ -87,8 +87,6 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 }
 
 func retrieveBootstrapIpAddr(apiVip string) {
-	var err error
-
 	if gBootstrapIP != "" {
 		return
 	}
@@ -99,7 +97,7 @@ func retrieveBootstrapIpAddr(apiVip string) {
 	}
 	if gBootstrapIP != "" {
 		// Test if bootstrap is still up and running
-		retrievedIP, err := config.GetBootstrapIP(gBootstrapIP)
+		_, err := config.GetBootstrapIP(gBootstrapIP)
 		if err != nil { // Let's clear the bootstrap, since it is probably gone
 			gBootstrapIP = ""
 			log.Debugf("Bootstrap unicast IP server no longer listening at: %s", gBootstrapIP)
@@ -202,7 +200,6 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
-	var newConfig config.Node
 	var configChangeCtr uint8 = 0
 
 	// Lease VIPS
@@ -260,7 +257,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			return nil
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -275,7 +272,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			} else {
 				newConfig.EnableUnicast = false
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			updateUnicastConfig(kubeconfigPath, &newConfig)
 
 			log.WithFields(logrus.Fields{
 				"curConfig": newConfig,
@@ -307,7 +304,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			appliedConfig = curConfig
 
 		default:
-			newConfig, err = config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -321,7 +318,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
 				newConfig.EnableUnicast = curEnableUnicast
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			updateUnicastConfig(kubeconfigPath, &newConfig)
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
