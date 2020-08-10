@@ -30,7 +30,7 @@ const (
 )
 
 var (
-	gBootstrapIP string
+	gBootstrapIP string = ""
 )
 
 func getActualMode(cfgPath string) (error, bool) {
@@ -97,9 +97,11 @@ func retrieveBootstrapIpAddr(apiVip string) {
 		gBootstrapIP = ""
 		return
 	}
-	gBootstrapIP, err = config.GetBootstrapIP(apiVip)
+	retrievedIP, err := config.GetBootstrapIP(apiVip)
 	if err != nil {
 		log.Debugf("Could not retrieve bootstrap IP: %v", err)
+	} else {
+		gBootstrapIP = retrievedIP
 	}
 }
 
