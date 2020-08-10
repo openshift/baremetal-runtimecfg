@@ -67,11 +67,15 @@ func runDisplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+	cfg, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
 	if err != nil {
 		return err
 	}
+	lbConf, err := config.GetLBConfig(kubeCfgPath, apiPort, lbPort, statPort, apiVip)
+	if err == nil {
+		cfg.LBConfig = lbConf
+	}
 
-	spew.Dump(config)
+	spew.Dump(cfg)
 	return err
 }
