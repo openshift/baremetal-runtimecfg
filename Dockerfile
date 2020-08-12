@@ -9,7 +9,7 @@ RUN GO111MODULE=on go build --mod=vendor cmd/unicastipserver/unicastipserver.go
 
 FROM registry.access.redhat.com/ubi8/ubi:latest
 
-RUN yum install -y dhcp-client && yum clean all
+RUN yum install -y dhclient && yum clean all
 
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/runtimecfg /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/monitor /usr/bin
