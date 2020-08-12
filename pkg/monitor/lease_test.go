@@ -1,32 +1,37 @@
 package monitor
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-openapi/strfmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/openshift/baremetal-runtimecfg/pkg/config"
+	"github.com/sirupsen/logrus"
 	"github.com/syndtr/gocapability/capability"
 	"github.com/vishvananda/netlink"
+	"gopkg.in/yaml.v2"
 )
 
 const LeaseTime = 5 * time.Second
 
 var _ = Describe("lease_vip", func() {
 	var (
-		realIP    net.IP
-		realIface net.Interface
+		log       logrus.FieldLogger
+		realIface *net.Interface
 		testIface *net.Interface
-		testIP    net.IP
+		testIP    strfmt.IPv4
 		testName  string
+		testMac   net.HardwareAddr
 		err       error
 		cfgPath   string
 	)
@@ -36,19 +41,14 @@ var _ = Describe("lease_vip", func() {
 			Skip("Must run with capabilities: CAP_NET_ADMIN, CAP_NET_RAW")
 		}
 
-		host, _ := os.Hostname()
-		addrs, _ := net.LookupIP(host)
-		for _, addr := range addrs {
-			if ipv4 := addr.To4(); ipv4 != nil {
-				realIP = ipv4
+		log = logrus.New()
 
-				testAddr := append(addr[:15], (addr[15] + 1))
-				testIP = testAddr.To4()
+		realIface, err = net.InterfaceByName("eth0")
+		Expect(err).ShouldNot(HaveOccurred())
 
-				realIface, _, err = config.GetInterfaceAndNonVIPAddr([]net.IP{realIP})
-				Expect(err).ShouldNot(HaveOccurred())
-			}
-		}
+		testName = generateUUID()[:4]
+		testIP = generateIP()
+		testMac = generateMac()
 
 		testName = generateUUID()[:4]
 
@@ -57,17 +57,17 @@ var _ = Describe("lease_vip", func() {
 		cfgPath = file.Name()
 	})
 
-	Describe("leaseInterface", func() {
+	Describe("LeaseInterface", func() {
 		It("happy_flow", func() {
-			testIface, err = leaseInterface(realIface.Name, testName)
+			testIface, err = LeaseInterface(log, realIface.Name, testName, testMac)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 
 		It("different_names", func() {
-			testIface, err = leaseInterface(realIface.Name, testName)
+			testIface, err = LeaseInterface(log, realIface.Name, testName, testMac)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			iface2, err := leaseInterface(realIface.Name, generateUUID()[:4])
+			iface2, err := LeaseInterface(log, realIface.Name, generateUUID()[:4], generateMac())
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(iface2.Name).ShouldNot(Equal(realIface.Name))
 			Expect(iface2.Name).ShouldNot(Equal(testIface.Name))
@@ -78,10 +78,10 @@ var _ = Describe("lease_vip", func() {
 		})
 
 		It("predefined_macvlan", func() {
-			testIface, err = leaseInterface(realIface.Name, testName)
+			testIface, err = LeaseInterface(log, realIface.Name, testName, testMac)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			iface2, err := leaseInterface(realIface.Name, testName)
+			iface2, err := LeaseInterface(log, realIface.Name, testName, testMac)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(iface2.Name).Should(Equal(testIface.Name))
 			Expect(iface2.HardwareAddr).Should(Equal(testIface.HardwareAddr))
@@ -91,6 +91,7 @@ var _ = Describe("lease_vip", func() {
 			Expect(testIface.Name).ShouldNot(Equal(realIface.Name))
 			Expect(testIface.HardwareAddr).ShouldNot(Equal(realIface.HardwareAddr))
 
+			// Verify link parameters
 			link, err := netlink.LinkByName(testIface.Name)
 			Expect(err).ShouldNot(HaveOccurred())
 			macvlan, ok := link.(*netlink.Macvlan)
@@ -108,9 +109,9 @@ var _ = Describe("lease_vip", func() {
 		})
 	})
 
-	Describe("leaseVIP", func() {
+	Describe("LeaseVIP", func() {
 		BeforeEach(func() {
-			Expect(leaseVIP(cfgPath, realIface.Name, testName)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, testMac)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 		})
 
@@ -121,7 +122,7 @@ var _ = Describe("lease_vip", func() {
 
 		It("multiple_vips", func() {
 			for i := 2; i < 5; i++ {
-				Expect(leaseVIP(cfgPath, realIface.Name, testName+strconv.Itoa(i))).ShouldNot(HaveOccurred())
+				Expect(LeaseVIP(log, cfgPath, realIface.Name, testName+strconv.Itoa(i), generateMac())).ShouldNot(HaveOccurred())
 			}
 
 			time.Sleep(LeaseTime)
@@ -137,7 +138,7 @@ var _ = Describe("lease_vip", func() {
 			cleanEnv(cfgPath)
 
 			newName := generateUUID()[:4]
-			Expect(leaseVIP(cfgPath, realIface.Name, newName)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIP(log, cfgPath, realIface.Name, newName, generateMac())).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 			Expect(getIPFromLeaseFile(cfgPath, newName)).ShouldNot(Equal(ip))
 			deleteInterface(newName)
@@ -148,7 +149,7 @@ var _ = Describe("lease_vip", func() {
 
 			cleanEnv(cfgPath)
 
-			Expect(leaseVIP(cfgPath, realIface.Name, testName)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, testMac)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 			Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal(ip))
 		})
@@ -165,60 +166,61 @@ var _ = Describe("lease_vip", func() {
 	})
 
 	It("server_hardcoded_host", func() {
-		testName = "test"
-		Expect(leaseVIP(cfgPath, realIface.Name, testName)).ShouldNot(HaveOccurred())
+		mac, err := net.ParseMAC("00:1a:4a:92:c8:d7")
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, mac)).ShouldNot(HaveOccurred())
 
 		time.Sleep(LeaseTime)
 		Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal("172.99.0.55"))
 	})
 
-	Describe("leaseVIPs", func() {
+	Describe("LeaseVIPs", func() {
 		It("happy_flow", func() {
 			clusterName := generateUUID()
-			vips := []VIP{
-				{"api", testIP},
-				{"ingress", testIP},
+			vips := []vip{
+				{"api", generateMac().String(), generateIP().String()},
+				{"ingress", generateMac().String(), generateIP().String()},
 			}
-			Expect(leaseVIPs(cfgPath, clusterName, vips)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIPs(log, cfgPath, clusterName, realIface.Name, vips)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 
 			for _, vip := range vips {
-				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.name))).Should(
-					Equal(GetClusterInterfaceName(clusterName, vip.name)))
+				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.Name))).Should(
+					Equal(GetClusterInterfaceName(clusterName, vip.Name)))
 
-				deleteInterface(GetClusterInterfaceName(clusterName, vip.name))
+				deleteInterface(GetClusterInterfaceName(clusterName, vip.Name))
 			}
 		})
 
 		It("cluster_long_name", func() {
 			clusterName := generateUUID()
-			vips := []VIP{
-				{generateUUID(), testIP},
+			vips := []vip{
+				{generateUUID(), testMac.String(), testIP.String()},
 			}
-			Expect(leaseVIPs(cfgPath, clusterName, vips)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIPs(log, cfgPath, clusterName, realIface.Name, vips)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 
 			for _, vip := range vips {
-				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.name))).Should(
-					Equal(GetClusterInterfaceName(clusterName, vip.name)))
+				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.Name))).Should(
+					Equal(GetClusterInterfaceName(clusterName, vip.Name)))
 
-				deleteInterface(GetClusterInterfaceName(clusterName, vip.name))
+				deleteInterface(GetClusterInterfaceName(clusterName, vip.Name))
 			}
 		})
 
 		It("short_name", func() {
 			clusterName := generateUUID()[:1]
-			vips := []VIP{
-				{generateUUID()[:1], testIP},
+			vips := []vip{
+				{generateUUID()[:1], testMac.String(), testIP.String()},
 			}
-			Expect(leaseVIPs(cfgPath, clusterName, vips)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIPs(log, cfgPath, clusterName, realIface.Name, vips)).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 
 			for _, vip := range vips {
-				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.name))).Should(
-					Equal(GetClusterInterfaceName(clusterName, vip.name)))
+				Expect(getInterfaceFromLeaseFile(cfgPath, GetClusterInterfaceName(clusterName, vip.Name))).Should(
+					Equal(GetClusterInterfaceName(clusterName, vip.Name)))
 
-				deleteInterface(GetClusterInterfaceName(clusterName, vip.name))
+				deleteInterface(GetClusterInterfaceName(clusterName, vip.Name))
 			}
 		})
 	})
@@ -230,6 +232,59 @@ var _ = Describe("lease_vip", func() {
 		if testIface != nil {
 			deleteInterface(testIface.Name)
 		}
+	})
+})
+
+var _ = Describe("getVipsToLease", func() {
+	var (
+		path    string = filepath.Join("/tmp", MonitorConfFileName)
+		cfgPath string = filepath.Join("/tmp", "cfg")
+	)
+
+	It("file_doesnt_exist", func() {
+		vips, err := getVipsToLease(cfgPath)
+		Expect(err).Should(BeNil())
+		Expect(vips).Should(BeNil())
+	})
+
+	It("path_is_directory", func() {
+		var buffer []byte
+
+		Expect(ioutil.WriteFile(path, buffer, os.ModeDir)).ShouldNot(HaveOccurred())
+
+		vips, err := getVipsToLease(cfgPath)
+		Expect(err).Should(HaveOccurred())
+		Expect(vips).Should(BeNil())
+	})
+
+	It("invalid_content", func() {
+		var buffer []byte = []byte("hello\n")
+
+		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+
+		vips, err := getVipsToLease(cfgPath)
+		Expect(err).Should(HaveOccurred())
+		Expect(vips).Should(BeNil())
+	})
+
+	It("valid_content", func() {
+		data := []vip{
+			{"api", generateMac().String(), generateIP().String()},
+			{"ingress", generateMac().String(), generateIP().String()},
+		}
+
+		buffer, err := yaml.Marshal(&data)
+		Expect(err).ShouldNot(HaveOccurred())
+
+		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+
+		vips, err := getVipsToLease(cfgPath)
+		Expect(err).Should(BeNil())
+		Expect(*vips).Should(Equal(data))
+	})
+
+	AfterEach(func() {
+		_ = os.RemoveAll(path)
 	})
 })
 
@@ -260,11 +315,43 @@ func generateUUID() string {
 	return getOutput("uuidgen")
 }
 
+func generateIP() strfmt.IPv4 {
+	buf := make([]byte, 4)
+	_, err := rand.Read(buf)
+	Expect(err).ShouldNot(HaveOccurred())
+
+	return strfmt.IPv4(fmt.Sprintf("%d.%d.%d.%d", buf[0], buf[1], buf[2], buf[3]))
+}
+
+func generateMacString() strfmt.MAC {
+	var MacPrefixQumranet = [...]byte{0x00, 0x1A, 0x4A}
+
+	buf := make([]byte, 3)
+	_, err := rand.Read(buf)
+	Expect(err).ShouldNot(HaveOccurred())
+
+	return strfmt.MAC(fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+		MacPrefixQumranet[0], MacPrefixQumranet[1], MacPrefixQumranet[2], buf[0], buf[1], buf[2]))
+}
+
+func generateMac() net.HardwareAddr {
+	mac, err := net.ParseMAC(generateMacString().String())
+	Expect(err).ShouldNot(HaveOccurred())
+
+	return mac
+}
+
 func getIPFromLeaseFile(cfgPath, name string) string {
+	info, err := os.Stat(getLeaseFile(cfgPath, name))
+	Expect(err).ShouldNot(HaveOccurred())
+	Expect(info.Mode().IsRegular()).Should(BeTrue())
 	return getOutput(fmt.Sprintf("cat %s | awk '$1==\"fixed-address\" {print $2}' | tr -d ';'", getLeaseFile(cfgPath, name)))
 }
 
 func getInterfaceFromLeaseFile(cfgPath, name string) string {
+	info, err := os.Stat(getLeaseFile(cfgPath, name))
+	Expect(err).ShouldNot(HaveOccurred())
+	Expect(info.Mode().IsRegular()).Should(BeTrue())
 	return getOutput(fmt.Sprintf("cat %s | awk '$1==\"interface\" {print $2}' | tr -d '\";'", getLeaseFile(cfgPath, name)))
 }
 
@@ -280,5 +367,5 @@ func getOutput(command string) string {
 
 func Test(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "leases tests")
+	RunSpecs(t, "Leases tests")
 }

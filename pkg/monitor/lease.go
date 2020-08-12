@@ -2,71 +2,92 @@ package monitor
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 
-	"github.com/openshift/baremetal-runtimecfg/pkg/config"
-	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"gopkg.in/yaml.v2"
 )
 
 const MonitorConfFileName = "unsupported-monitor.conf"
 const leaseFile = "lease-%s"
-const macAddressBytes = 6
 
-var MacPrefixQumranet = [...]byte{0x00, 0x1A, 0x4A}
-
-type VIP struct {
-	name string
-	ip   net.IP
+type vip struct {
+	Name       string `yaml:"name"`
+	MacAddress string `yaml:"mac-address"`
+	IpAddress  string `yaml:"ip-address"`
 }
 
-func needLease(cfgPath string) (bool, error) {
+func getVipsToLease(cfgPath string) (vips *[]vip, err error) {
 	monitorConfPath := filepath.Join(filepath.Dir(cfgPath), MonitorConfFileName)
 
-	_, err := os.Stat(monitorConfPath)
+	info, err := os.Stat(monitorConfPath)
 
-	if err == nil {
+	if err == nil && info.Mode().IsRegular() {
 		log.WithFields(logrus.Fields{
 			"file": monitorConfPath,
 		}).Info("Monitor conf file exist")
-		return true, nil
+
+		data, err := ioutil.ReadFile(monitorConfPath)
+
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"filename": monitorConfPath,
+			}).WithError(err).Error("Failed to read monitor file")
+			return nil, err
+		}
+
+		return parseMonitorFile(data)
 	}
 	if os.IsNotExist(err) {
 		log.WithFields(logrus.Fields{
 			"file": monitorConfPath,
 		}).Info("Monitor conf file doesn't exist")
-		return false, nil
+		return nil, nil
 	}
 
 	log.WithFields(logrus.Fields{
 		"file": monitorConfPath,
 	}).WithError(err).Error("Failed to get file status")
-	return false, err
+	return nil, err
 }
 
-func leaseVIPs(cfgPath string, clusterName string, vips []VIP) error {
-	for _, vip := range vips {
-		vipFullName := GetClusterInterfaceName(clusterName, vip.name)
+func parseMonitorFile(buffer []byte) (*[]vip, error) {
+	vips := make([]vip, 0)
 
-		vipMasterIface, _, err := config.GetInterfaceAndNonVIPAddr([]net.IP{vip.ip})
+	if err := yaml.Unmarshal(buffer, &vips); err != nil {
+		log.WithFields(logrus.Fields{
+			"buffer": buffer,
+		}).WithError(err).Error("Failed to parse monitor file")
+		return nil, err
+	}
+
+	return &vips, nil
+}
+
+func LeaseVIPs(log logrus.FieldLogger, cfgPath string, clusterName string, vipMasterIface string, vips []vip) error {
+	for _, vip := range vips {
+		vipFullName := GetClusterInterfaceName(clusterName, vip.Name)
+
+		mac, err := net.ParseMAC(vip.MacAddress)
+
 		if err != nil {
 			log.WithFields(logrus.Fields{
-				"name": vip.name,
-				"ip":   vip.ip,
-			}).WithError(err).Error("Failed to get the master device for a vip")
+				"vip": vip,
+			}).WithError(err).Error("Failed to parse mac")
 			return err
 		}
 
-		if err := leaseVIP(cfgPath, vipMasterIface.Name, vipFullName); err != nil {
+		if err := LeaseVIP(log, cfgPath, vipMasterIface, vipFullName, mac); err != nil {
 			log.WithFields(logrus.Fields{
+				"masterDevice": vipMasterIface,
 				"name":         vipFullName,
-				"masterDevice": vipMasterIface.Name,
-				"vip":          vip,
+				"mac":          vip.MacAddress,
 			}).WithError(err).Error("Failed to lease a vip")
 			return err
 		}
@@ -75,8 +96,8 @@ func leaseVIPs(cfgPath string, clusterName string, vips []VIP) error {
 	return nil
 }
 
-func leaseVIP(cfgPath, masterDevice, name string) error {
-	iface, err := leaseInterface(masterDevice, name)
+func LeaseVIP(log logrus.FieldLogger, cfgPath, masterDevice, name string, mac net.HardwareAddr) error {
+	iface, err := LeaseInterface(log, masterDevice, name, mac)
 
 	if err != nil {
 		log.WithFields(logrus.Fields{
@@ -93,9 +114,7 @@ func leaseVIP(cfgPath, masterDevice, name string) error {
 	return cmd.Start()
 }
 
-func leaseInterface(masterDevice string, name string) (*net.Interface, error) {
-	mac := GenerateMac(MacPrefixQumranet[:], name)
-
+func LeaseInterface(log logrus.FieldLogger, masterDevice string, name string, mac net.HardwareAddr) (*net.Interface, error) {
 	// Check if already exist
 	if macVlanIfc, err := net.InterfaceByName(name); err == nil {
 		return macVlanIfc, nil
@@ -126,6 +145,7 @@ func leaseInterface(masterDevice string, name string) (*net.Interface, error) {
 		log.WithFields(logrus.Fields{
 			"masterDev": masterDevice,
 			"name":      name,
+			"mac":       mac,
 		}).WithError(err).Error("Failed to create a macvlan")
 		return nil, err
 	}
@@ -157,15 +177,6 @@ func leaseInterface(masterDevice string, name string) (*net.Interface, error) {
 	}
 
 	return macVlanIfc, nil
-}
-
-func GenerateMac(prefix []byte, key string) (mac net.HardwareAddr) {
-	mac = append(net.HardwareAddr{}, prefix...)
-
-	hash := utils.PearsonHash([]byte(key), int(math.Max(0, float64(macAddressBytes-len(prefix)))))
-	mac = append(mac, hash...)
-
-	return
 }
 
 func GetClusterInterfaceName(clusterName, vipName string) string {

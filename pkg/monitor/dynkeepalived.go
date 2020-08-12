@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -187,39 +188,71 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
+func handleLeasing(kubeconfigPath, clusterConfigPath, cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
+	vips, err := getVipsToLease(cfgPath)
+
+	if err != nil {
+		return err
+	}
+
+	if vips == nil {
+		return nil
+	}
+
+	for _, vip := range *vips {
+		switch vip.Name {
+		case "api":
+			if vip.IpAddress != apiVip.String() {
+				return fmt.Errorf("Mismatched ip for %s. Expected: %s Actual: %s", vip.Name, apiVip.String(), vip.IpAddress)
+			}
+		case "ingress":
+			if vip.IpAddress != ingressVip.String() {
+				return fmt.Errorf("Mismatched ip for %s. Expected: %s Actual: %s", vip.Name, ingressVip.String(), vip.IpAddress)
+			}
+		default:
+			return fmt.Errorf("Unrecognized vip: %+v", vip)
+		}
+	}
+
+	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip, dnsVip)
+	if err != nil {
+		return err
+	}
+
+	clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
+
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"kubeconfigPath":    kubeconfigPath,
+			"clusterConfigPath": clusterConfigPath,
+		}).WithError(err).Error("Failed to get cluster name")
+		return err
+	}
+
+	if err = LeaseVIPs(log, cfgPath, clusterName, vipIface.Name, *vips); err != nil {
+		log.WithFields(logrus.Fields{
+			"cfgPath":        cfgPath,
+			"clusterName":    clusterName,
+			"vipMasterIface": vipIface.Name,
+			"vips":           vips,
+		}).WithError(err).Error("Failed to lease VIPS")
+		return err
+	}
+
+	log.WithFields(logrus.Fields{
+		"cfgPath":     cfgPath,
+		"clusterName": clusterName,
+	}).Info("Leased VIPS successfully")
+
+	return nil
+}
+
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
-	// Lease VIPS
-	if exists, err := needLease(cfgPath); err != nil {
+	if err := handleLeasing(kubeconfigPath, clusterConfigPath, cfgPath, apiVip, ingressVip, dnsVip); err != nil {
 		return err
-	} else if exists {
-		clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
-
-		if err != nil {
-			log.WithFields(logrus.Fields{
-				"kubeconfigPath":    kubeconfigPath,
-				"clusterConfigPath": clusterConfigPath,
-			}).WithError(err).Error("Failed to get cluster name")
-			return err
-		}
-
-		vips := []VIP{{"api", apiVip}, {"ingress", ingressVip}}
-		if err = leaseVIPs(cfgPath, clusterName, vips); err != nil {
-			log.WithFields(logrus.Fields{
-				"cfgPath":     cfgPath,
-				"clusterName": clusterName,
-				"vips":        vips,
-			}).WithError(err).Error("Failed to lease VIPS")
-			return err
-		}
-
-		log.WithFields(logrus.Fields{
-			"cfgPath":     cfgPath,
-			"clusterName": clusterName,
-			"vips":        vips,
-		}).Info("Leased VIPS successfully")
 	}
 
 	signals := make(chan os.Signal, 1)
