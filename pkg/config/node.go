@@ -10,7 +10,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
@@ -24,7 +23,6 @@ import (
 )
 
 const localhostKubeApiServerUrl string = "https://localhost:6443"
-const bootstrapIpServerPort string = "64444"
 
 var log = logrus.New()
 
@@ -181,25 +179,31 @@ func (c *Cluster) PopulateVRIDs() error {
 	}
 	return nil
 }
-func GetBootstrapIP(apiVip string) (bootstrapIP string, err error) {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(apiVip, bootstrapIpServerPort), 10*time.Second)
-	if err != nil {
-		log.Debugf("An error occurred on dial: %v", err)
-		return "", err
-	}
-	defer conn.Close()
+func GetBootstrapIP(kubeconfigPath string) (bootstrapIP string, err error) {
 
-	bootstrapIP, err = bufio.NewReader(conn).ReadString('\n')
+	/* Retrieve Bootstrap IP address from host-etcd-2 Endpoints resource,
+	https://github.com/openshift/cluster-etcd-operator/blob/dc45d2b84dfbd01bced0e5af2622b7f3181bc87a/bindata/bootkube/manifests/00_etcd-host-service-endpoints.yaml#L6 */
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
-		log.Infof("An error occurred on read: %v", err)
 		return "", err
 	}
 
-	bootstrapIP = strings.TrimSpace(bootstrapIP)
-
-	log.Infof("Got bootstrap IP %v", bootstrapIP)
-
-	return bootstrapIP, err
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return "", err
+	}
+	etcdEndpoints, err := clientset.CoreV1().Endpoints("openshift-etcd").Get("host-etcd-2", metav1.GetOptions{})
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Warn("Failed to read host-etcd-2 Endpoints")
+		return "", err
+	}
+	if bootstrapIP := etcdEndpoints.Annotations["alpha.installer.openshift.io/etcd-bootstrap"]; len(bootstrapIP) > 0 {
+		return bootstrapIP, nil
+	}
+	return "", errors.New("Can't retrieve Bootstrap IP from host-etcd-2 Endpoints")
 }
 
 func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {

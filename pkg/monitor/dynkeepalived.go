@@ -58,7 +58,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 	if !newConfig.EnableUnicast {
 		return
 	}
-	retrieveBootstrapIpAddr(newConfig.Cluster.APIVIP)
+	retrieveBootstrapIpAddr(kubeconfigPath)
 	newConfig.BootstrapIP = gBootstrapIP
 
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
@@ -86,7 +86,7 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	return cfgChanged && validConfig
 }
 
-func retrieveBootstrapIpAddr(apiVip string) {
+func retrieveBootstrapIpAddr(kubeconfigPath string) {
 	var err error
 
 	if gBootstrapIP != "" {
@@ -97,7 +97,7 @@ func retrieveBootstrapIpAddr(apiVip string) {
 		gBootstrapIP = ""
 		return
 	}
-	gBootstrapIP, err = config.GetBootstrapIP(apiVip)
+	gBootstrapIP, err = config.GetBootstrapIP(kubeconfigPath)
 	if err != nil {
 		log.Debugf("Could not retrieve bootstrap IP: %v", err)
 	}
