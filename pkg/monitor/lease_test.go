@@ -17,6 +17,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/syndtr/gocapability/capability"
 	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v2"
@@ -111,7 +112,7 @@ var _ = Describe("lease_vip", func() {
 
 	Describe("LeaseVIP", func() {
 		BeforeEach(func() {
-			Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, testMac)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, testMac, testIP.String())).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 		})
 
@@ -122,7 +123,7 @@ var _ = Describe("lease_vip", func() {
 
 		It("multiple_vips", func() {
 			for i := 2; i < 5; i++ {
-				Expect(LeaseVIP(log, cfgPath, realIface.Name, testName+strconv.Itoa(i), generateMac())).ShouldNot(HaveOccurred())
+				Expect(LeaseVIP(log, cfgPath, realIface.Name, testName+strconv.Itoa(i), generateMac(), testIP.String())).ShouldNot(HaveOccurred())
 			}
 
 			time.Sleep(LeaseTime)
@@ -138,7 +139,7 @@ var _ = Describe("lease_vip", func() {
 			cleanEnv(cfgPath)
 
 			newName := generateUUID()[:4]
-			Expect(LeaseVIP(log, cfgPath, realIface.Name, newName, generateMac())).ShouldNot(HaveOccurred())
+			Expect(LeaseVIP(log, cfgPath, realIface.Name, newName, generateMac(), testIP.String())).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 			Expect(getIPFromLeaseFile(cfgPath, newName)).ShouldNot(Equal(ip))
 			deleteInterface(newName)
@@ -149,7 +150,7 @@ var _ = Describe("lease_vip", func() {
 
 			cleanEnv(cfgPath)
 
-			Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, testMac)).ShouldNot(HaveOccurred())
+			Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, testMac, testIP.String())).ShouldNot(HaveOccurred())
 			time.Sleep(LeaseTime)
 			Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal(ip))
 		})
@@ -166,12 +167,13 @@ var _ = Describe("lease_vip", func() {
 	})
 
 	It("server_hardcoded_host", func() {
+		testIP := "172.99.0.55"
 		mac, err := net.ParseMAC("00:1a:4a:92:c8:d7")
 		Expect(err).ShouldNot(HaveOccurred())
-		Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, mac)).ShouldNot(HaveOccurred())
+		Expect(LeaseVIP(log, cfgPath, realIface.Name, testName, mac, testIP)).ShouldNot(HaveOccurred())
 
 		time.Sleep(LeaseTime)
-		Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal("172.99.0.55"))
+		Expect(getIPFromLeaseFile(cfgPath, testName)).Should(Equal(testIP))
 	})
 
 	Describe("LeaseVIPs", func() {
@@ -287,6 +289,163 @@ var _ = Describe("getVipsToLease", func() {
 		_ = os.RemoveAll(path)
 	})
 })
+
+var _ = Describe("WatchLeaseFile", func() {
+	var (
+		leaseFile string
+	)
+
+	BeforeEach(func() {
+		file, err := ioutil.TempFile("", "config")
+		Expect(err).ShouldNot(HaveOccurred())
+		leaseFile = file.Name()
+	})
+
+	It("invalid_file", func() {
+		logger, hook := test.NewNullLogger()
+
+		Expect(WatchLeaseFile(logger, leaseFile, "", "")).ShouldNot(HaveOccurred())
+		Expect(ioutil.WriteFile(leaseFile, []byte("hello world"), 0644)).ShouldNot(HaveOccurred())
+		time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+		Expect(hook.LastEntry().Message).Should(Equal("Failed to get lease information from leasing file"))
+	})
+
+	It("wrong_interface", func() {
+		logger, hook := test.NewNullLogger()
+
+		iface := "wrong_interface"
+		ip := "172.99.0.72"
+		data := createLeaseData(iface, ip)
+
+		Expect(WatchLeaseFile(logger, leaseFile, "another_interface", ip)).ShouldNot(HaveOccurred())
+		Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+		time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+		Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with wrong data"))
+		Expect(hook.LastEntry().Data["iface"]).Should(Equal(iface))
+		Expect(hook.LastEntry().Data["ip"]).Should(Equal(ip))
+	})
+
+	It("wrong_ip", func() {
+		logger, hook := test.NewNullLogger()
+
+		iface := "wrong_ip"
+		ip := "172.99.0.72"
+		data := createLeaseData(iface, ip)
+
+		Expect(WatchLeaseFile(logger, leaseFile, iface, "172.99.0.16")).ShouldNot(HaveOccurred())
+		Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+		time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+		Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with wrong data"))
+		Expect(hook.LastEntry().Data["iface"]).Should(Equal(iface))
+		Expect(hook.LastEntry().Data["ip"]).Should(Equal(ip))
+	})
+
+	It("valid_lease_file", func() {
+		logger, hook := test.NewNullLogger()
+
+		iface := "valid_lease_file"
+		ip := "172.99.0.72"
+		data := createLeaseData(iface, ip)
+
+		Expect(WatchLeaseFile(logger, leaseFile, iface, ip)).ShouldNot(HaveOccurred())
+		Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+		time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+		Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with the right data"))
+		Expect(hook.LastEntry().Data["iface"]).Should(Equal(iface))
+		Expect(hook.LastEntry().Data["ip"]).Should(Equal(ip))
+	})
+
+	It("valid_multiple_leases", func() {
+		logger, hook := test.NewNullLogger()
+
+		iface := "valid_multiple_leases"
+		ip := "172.99.0.72"
+		data := ""
+
+		Expect(WatchLeaseFile(logger, leaseFile, iface, ip)).ShouldNot(HaveOccurred())
+
+		for range []int{1, 2, 3} {
+			data += createLeaseData(iface, ip)
+
+			Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+			time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+			Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with the right data"))
+			Expect(hook.LastEntry().Data["iface"]).Should(Equal(iface))
+			Expect(hook.LastEntry().Data["ip"]).Should(Equal(ip))
+		}
+	})
+
+	It("invalid_multiple_leases", func() {
+		logger, hook := test.NewNullLogger()
+
+		valid_lease := map[string]string{"1": "1.1.1.1"}
+		data := ""
+
+		invalid_leases := map[string]string{"2": "2.2.2.2", "3": "3.3.3.3"}
+
+		Expect(WatchLeaseFile(logger, leaseFile, "1", valid_lease["1"])).ShouldNot(HaveOccurred())
+
+		By("first_valid_lease", func() {
+			data += createLeaseData("1", valid_lease["1"])
+
+			Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+			time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+			Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with the right data"))
+			Expect(hook.LastEntry().Data["iface"]).Should(Equal("1"))
+			Expect(hook.LastEntry().Data["ip"]).Should(Equal(valid_lease["1"]))
+		})
+
+		By("other_invalid_leases", func() {
+			for iface, ip := range invalid_leases {
+				data += createLeaseData(iface, ip)
+
+				Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+				time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+				Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with wrong data"))
+				Expect(hook.LastEntry().Data["iface"]).Should(Equal(iface))
+				Expect(hook.LastEntry().Data["ip"]).Should(Equal(ip))
+			}
+		})
+
+		By("another_valid_lease", func() {
+			data += createLeaseData("1", valid_lease["1"])
+
+			Expect(ioutil.WriteFile(leaseFile, []byte(data), 0644)).ShouldNot(HaveOccurred())
+			time.Sleep(100 * time.Millisecond) // give system time to sync write change
+
+			Expect(hook.LastEntry().Message).Should(Equal("A new lease has been written to the lease file with the right data"))
+			Expect(hook.LastEntry().Data["iface"]).Should(Equal("1"))
+			Expect(hook.LastEntry().Data["ip"]).Should(Equal(valid_lease["1"]))
+		})
+	})
+
+	AfterEach(func() {
+		_ = os.RemoveAll(leaseFile)
+	})
+})
+
+func createLeaseData(ifaceName, ip string) string {
+	return fmt.Sprintf(`
+	lease {
+		interface "%s";
+		fixed-address %s;
+		option subnet-mask 255.255.255.0;
+		option dhcp-lease-time 43200;
+		option dhcp-message-type 5;
+		option dhcp-server-identifier 172.99.0.2;
+		renew 1 2020/08/17 21:11:32;
+		rebind 2 2020/08/18 01:43:00;
+		expire 2 2020/08/18 03:13:00;
+	  }
+	`, ifaceName, ip)
+}
 
 func hasCap(newCaps ...capability.Cap) bool {
 	caps, err := capability.NewPid(0)

@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"gopkg.in/fsnotify.v1"
 	"gopkg.in/yaml.v2"
 )
 
@@ -83,11 +85,12 @@ func LeaseVIPs(log logrus.FieldLogger, cfgPath string, clusterName string, vipMa
 			return err
 		}
 
-		if err := LeaseVIP(log, cfgPath, vipMasterIface, vipFullName, mac); err != nil {
+		if err := LeaseVIP(log, cfgPath, vipMasterIface, vipFullName, mac, vip.IpAddress); err != nil {
 			log.WithFields(logrus.Fields{
 				"masterDevice": vipMasterIface,
 				"name":         vipFullName,
-				"mac":          vip.MacAddress,
+				"mac":          mac,
+				"ip":           vip.IpAddress,
 			}).WithError(err).Error("Failed to lease a vip")
 			return err
 		}
@@ -96,7 +99,7 @@ func LeaseVIPs(log logrus.FieldLogger, cfgPath string, clusterName string, vipMa
 	return nil
 }
 
-func LeaseVIP(log logrus.FieldLogger, cfgPath, masterDevice, name string, mac net.HardwareAddr) error {
+func LeaseVIP(log logrus.FieldLogger, cfgPath, masterDevice, name string, mac net.HardwareAddr, ip string) error {
 	iface, err := LeaseInterface(log, masterDevice, name, mac)
 
 	if err != nil {
@@ -107,11 +110,136 @@ func LeaseVIP(log logrus.FieldLogger, cfgPath, masterDevice, name string, mac ne
 		return err
 	}
 
+	lease_file := getLeaseFile(cfgPath, name)
+	if f, err := os.Create(lease_file); err != nil {
+		log.WithFields(logrus.Fields{
+			"name": lease_file,
+		}).WithError(err).Error("Failed to create lease file")
+		return err
+	} else {
+		f.Close()
+	}
+
+	if err := WatchLeaseFile(log, lease_file, iface.Name, ip); err != nil {
+		log.WithFields(logrus.Fields{
+			"filename":      lease_file,
+			"expectedIface": iface.Name,
+			"expectedIp":    ip,
+		}).WithError(err).Error("Failed to watch the lease file")
+		return err
+	}
+
 	cmd := exec.Command("dhclient", "-d", "--no-pid", "-sf", "/bin/true",
-		"-lf", getLeaseFile(cfgPath, name), "-v", iface.Name, "-H", name)
+		"-lf", lease_file, "-v", iface.Name, "-H", name)
 	cmd.Stderr = os.Stderr
 
 	return cmd.Start()
+}
+
+func WatchLeaseFile(log logrus.FieldLogger, fileName, expectedIface, expectedIp string) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.WithError(err).Error("Failed to add a create a new watcher")
+		return err
+	}
+
+	err = watcher.Add(fileName)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"filename": fileName,
+		}).WithError(err).Error("Failed to add a watcher to lease file")
+		return err
+	}
+
+	go func(log logrus.FieldLogger) {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					if iface, ip, err := GetLastLeaseFromFile(log, fileName); err != nil {
+						log.WithFields(logrus.Fields{
+							"filename": fileName,
+						}).WithError(err).Error("Failed to get lease information from leasing file")
+					} else if iface != expectedIface || ip != expectedIp {
+						log.WithFields(logrus.Fields{
+							"filename":      fileName,
+							"iface":         iface,
+							"expectedIface": expectedIface,
+							"ip":            ip,
+							"expectedIp":    expectedIp,
+						}).WithError(err).Error("A new lease has been written to the lease file with wrong data")
+					} else {
+						log.WithFields(logrus.Fields{
+							"fileName": fileName,
+							"iface":    iface,
+							"ip":       ip,
+						}).Info("A new lease has been written to the lease file with the right data")
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+
+				log.WithFields(logrus.Fields{
+					"filename": fileName,
+				}).WithError(err).Error("Lease file watcher error")
+			}
+		}
+	}(log)
+
+	return nil
+}
+
+func GetLastLeaseFromFile(log logrus.FieldLogger, fileName string) (string, string, error) {
+	data, err := ioutil.ReadFile(fileName)
+
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"filename": fileName,
+		}).WithError(err).Error("Failed to read lease file")
+		return "", "", err
+	}
+
+	patternIface := regexp.MustCompile(`\s*interface\s+\"(\w+)\";`)
+	matchesIface := patternIface.FindAllStringSubmatch(string(data), -1)
+
+	if len(matchesIface) == 0 {
+		err := fmt.Errorf("No interfaces in lease file")
+		log.WithFields(logrus.Fields{
+			"filename": fileName,
+		}).Error(err)
+
+		return "", "", err
+	}
+
+	patternIp := regexp.MustCompile(`.+fixed-address\s+(.+);`)
+	matchesIp := patternIp.FindAllStringSubmatch(string(data), -1)
+
+	if len(matchesIp) == 0 {
+		err := fmt.Errorf("No fixed addresses in lease file")
+		log.WithFields(logrus.Fields{
+			"filename": fileName,
+		}).Error(err)
+
+		return "", "", err
+	}
+
+	if len(matchesIp) != len(matchesIface) {
+		err := fmt.Errorf("Mismatch amount of interfaces and ips")
+		log.WithFields(logrus.Fields{
+			"matchesIp":    matchesIp,
+			"matchesIface": matchesIface,
+		}).Error(err)
+
+		return "", "", err
+	}
+
+	return matchesIface[len(matchesIface)-1][1], matchesIp[len(matchesIp)-1][1], nil
 }
 
 func LeaseInterface(log logrus.FieldLogger, masterDevice string, name string, mac net.HardwareAddr) (*net.Interface, error) {
