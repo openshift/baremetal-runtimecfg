@@ -188,7 +188,7 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
-func handleLeasing(kubeconfigPath, clusterConfigPath, cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
+func handleLeasing(cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
 	vips, err := getVipsToLease(cfgPath)
 
 	if err != nil {
@@ -199,19 +199,12 @@ func handleLeasing(kubeconfigPath, clusterConfigPath, cfgPath string, apiVip, in
 		return nil
 	}
 
-	for _, vip := range *vips {
-		switch vip.Name {
-		case "api":
-			if vip.IpAddress != apiVip.String() {
-				return fmt.Errorf("Mismatched ip for %s. Expected: %s Actual: %s", vip.Name, apiVip.String(), vip.IpAddress)
-			}
-		case "ingress":
-			if vip.IpAddress != ingressVip.String() {
-				return fmt.Errorf("Mismatched ip for %s. Expected: %s Actual: %s", vip.Name, ingressVip.String(), vip.IpAddress)
-			}
-		default:
-			return fmt.Errorf("Unrecognized vip: %+v", vip)
-		}
+	if vips.APIVip.IpAddress != apiVip.String() {
+		return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVip.String(), vips.APIVip.IpAddress)
+	}
+
+	if vips.IngressVip.IpAddress != ingressVip.String() {
+		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
 	}
 
 	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip, dnsVip)
@@ -219,29 +212,17 @@ func handleLeasing(kubeconfigPath, clusterConfigPath, cfgPath string, apiVip, in
 		return err
 	}
 
-	clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
-
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"kubeconfigPath":    kubeconfigPath,
-			"clusterConfigPath": clusterConfigPath,
-		}).WithError(err).Error("Failed to get cluster name")
-		return err
-	}
-
-	if err = LeaseVIPs(log, cfgPath, clusterName, vipIface.Name, *vips); err != nil {
+	if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{*vips.APIVip, *vips.IngressVip}); err != nil {
 		log.WithFields(logrus.Fields{
 			"cfgPath":        cfgPath,
-			"clusterName":    clusterName,
 			"vipMasterIface": vipIface.Name,
-			"vips":           vips,
+			"vips":           []vip{*vips.APIVip, *vips.IngressVip},
 		}).WithError(err).Error("Failed to lease VIPS")
 		return err
 	}
 
 	log.WithFields(logrus.Fields{
-		"cfgPath":     cfgPath,
-		"clusterName": clusterName,
+		"cfgPath": cfgPath,
 	}).Info("Leased VIPS successfully")
 
 	return nil
@@ -251,7 +232,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
-	if err := handleLeasing(kubeconfigPath, clusterConfigPath, cfgPath, apiVip, ingressVip, dnsVip); err != nil {
+	if err := handleLeasing(cfgPath, apiVip, ingressVip, dnsVip); err != nil {
 		return err
 	}
 
