@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -187,39 +188,52 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
+func handleLeasing(cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
+	vips, err := getVipsToLease(cfgPath)
+
+	if err != nil {
+		return err
+	}
+
+	if vips == nil {
+		return nil
+	}
+
+	if vips.APIVip.IpAddress != apiVip.String() {
+		return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVip.String(), vips.APIVip.IpAddress)
+	}
+
+	if vips.IngressVip.IpAddress != ingressVip.String() {
+		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
+	}
+
+	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip, dnsVip)
+	if err != nil {
+		return err
+	}
+
+	if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{*vips.APIVip, *vips.IngressVip}); err != nil {
+		log.WithFields(logrus.Fields{
+			"cfgPath":        cfgPath,
+			"vipMasterIface": vipIface.Name,
+			"vips":           []vip{*vips.APIVip, *vips.IngressVip},
+		}).WithError(err).Error("Failed to lease VIPS")
+		return err
+	}
+
+	log.WithFields(logrus.Fields{
+		"cfgPath": cfgPath,
+	}).Info("Leased VIPS successfully")
+
+	return nil
+}
+
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
-	// Lease VIPS
-	if exists, err := needLease(cfgPath); err != nil {
+	if err := handleLeasing(cfgPath, apiVip, ingressVip, dnsVip); err != nil {
 		return err
-	} else if exists {
-		clusterName, _, err := config.GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
-
-		if err != nil {
-			log.WithFields(logrus.Fields{
-				"kubeconfigPath":    kubeconfigPath,
-				"clusterConfigPath": clusterConfigPath,
-			}).WithError(err).Error("Failed to get cluster name")
-			return err
-		}
-
-		vips := []VIP{{"api", apiVip}, {"ingress", ingressVip}}
-		if err = leaseVIPs(cfgPath, clusterName, vips); err != nil {
-			log.WithFields(logrus.Fields{
-				"cfgPath":     cfgPath,
-				"clusterName": clusterName,
-				"vips":        vips,
-			}).WithError(err).Error("Failed to lease VIPS")
-			return err
-		}
-
-		log.WithFields(logrus.Fields{
-			"cfgPath":     cfgPath,
-			"clusterName": clusterName,
-			"vips":        vips,
-		}).Info("Leased VIPS successfully")
 	}
 
 	signals := make(chan os.Signal, 1)

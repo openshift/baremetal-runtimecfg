@@ -14,6 +14,7 @@ services:
     working_dir: /src
     environment:
       - GOCACHE=/go/pkg/mod
+      - FOCUS
     depends_on:
       - dhcpd
     networks:
