@@ -1,4 +1,4 @@
-FROM registry.svc.ci.openshift.org/openshift/release:golang-1.12 AS builder
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-openshift-4.6 AS builder
 WORKDIR /go/src/github.com/openshift/baremetal-runtimecfg
 COPY . .
 RUN GO111MODULE=on go build --mod=vendor -o runtimecfg ./cmd/runtimecfg
@@ -7,7 +7,7 @@ RUN GO111MODULE=on go build --mod=vendor cmd/corednsmonitor/corednsmonitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/monitor/monitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/unicastipserver/unicastipserver.go
 
-FROM registry.access.redhat.com/ubi8/ubi:latest
+FROM registry.svc.ci.openshift.org/ocp/4.6:base
 
 RUN yum install -y dhclient diffutils && yum clean all
 
