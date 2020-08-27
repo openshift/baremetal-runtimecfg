@@ -197,7 +197,7 @@ func GetBootstrapIP(apiVip string) (bootstrapIP string, err error) {
 
 	bootstrapIP = strings.TrimSpace(bootstrapIP)
 
-	log.Infof("Got bootstrap IP %v", bootstrapIP)
+	log.Debugf("Got bootstrap IP %v", bootstrapIP)
 
 	return bootstrapIP, err
 }

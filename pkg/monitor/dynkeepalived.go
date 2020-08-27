@@ -30,7 +30,8 @@ const (
 )
 
 var (
-	gBootstrapIP string
+	gBootstrapIP     string
+	gUnicastServerIP string
 )
 
 func getActualMode(cfgPath string) (error, bool) {
@@ -87,19 +88,29 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 }
 
 func retrieveBootstrapIpAddr(apiVip string) {
-	var err error
 
-	if gBootstrapIP != "" {
-		return
-	}
 	// we don't need to read the bootstrap IP address for bootstrap node
 	if os.Getenv("IS_BOOTSTRAP") == "yes" {
 		gBootstrapIP = ""
 		return
 	}
-	gBootstrapIP, err = config.GetBootstrapIP(apiVip)
-	if err != nil {
-		log.Debugf("Could not retrieve bootstrap IP: %v", err)
+
+	// First we use api_vip as server IP
+	if gUnicastServerIP == "" {
+		log.Infof("Unicast server IP set to %s", apiVip)
+		gUnicastServerIP = apiVip
+	}
+
+	retrievedIP, err := config.GetBootstrapIP(gUnicastServerIP)
+	if gBootstrapIP != retrievedIP {
+		log.Infof("Bootstrap IP read from server:%s , err :%v changed from: %s to: %s", gUnicastServerIP, err, gBootstrapIP, retrievedIP)
+		gBootstrapIP = retrievedIP
+	}
+
+	// Update server IP to bootstrap IP if possible
+	if err == nil && gUnicastServerIP != retrievedIP && retrievedIP != "" {
+		log.Infof("Unicast server IP changed from: %s to: %s", gUnicastServerIP, retrievedIP)
+		gUnicastServerIP = retrievedIP
 	}
 }
 
