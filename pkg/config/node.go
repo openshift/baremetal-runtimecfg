@@ -404,10 +404,19 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 		config.FrontendAddr = "::"
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
-	backends, err := getSortedBackends(kubeconfigPath, false)
-	if err != nil {
-		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
-		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
+	isBootstrap := os.Getenv("IS_BOOTSTRAP") == "yes"
+	var err error
+	var backends []Backend
+	// On the bootstrap we only want to look at the local apiserver. Once that goes
+	// down we want to shut down keepalived so the API VIP can move to the masters.
+	if !isBootstrap {
+		backends, err = getSortedBackends(kubeconfigPath, false)
+	}
+	if err != nil || isBootstrap {
+		if !isBootstrap {
+			log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
+			log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
+		}
 		backends, err = getSortedBackends(kubeconfigPath, true)
 		if err != nil {
 			log.WithFields(logrus.Fields{
