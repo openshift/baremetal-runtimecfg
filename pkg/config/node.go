@@ -348,8 +348,11 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 		return node, errors.New("No upstream DNS servers found")
 	}
 
-	prefix, _ := nonVipAddr.Mask.Size()
-	node.Cluster.VIPNetmask = prefix
+	if apiVip.To4() == nil {
+		node.Cluster.VIPNetmask = 128
+	} else {
+		node.Cluster.VIPNetmask = 32
+	}
 	node.VRRPInterface = vipIface.Name
 
 	// We can't populate this with GetLBConfig because in many cases the
