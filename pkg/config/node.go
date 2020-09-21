@@ -368,10 +368,10 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 
 // getSortedBackends builds config to communicate with kube-api based on kubeconfigPath parameter value, if kubeconfigPath is not empty it will build the
 // config based on that content else config will point to localhost.
-func getSortedBackends(kubeconfigPath string) (backends []Backend, err error) {
+func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool) (backends []Backend, err error) {
 
 	kubeApiServerUrl := ""
-	if kubeconfigPath == "" {
+	if readFromLocalAPI {
 		kubeApiServerUrl = localhostKubeApiServerUrl
 	}
 	config, err := clientcmd.BuildConfigFromFlags(kubeApiServerUrl, kubeconfigPath)
@@ -430,11 +430,11 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 		config.FrontendAddr = "::"
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
-	backends, err := getSortedBackends(kubeconfigPath)
+	backends, err := getSortedBackends(kubeconfigPath, false)
 	if err != nil {
 		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
 		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
-		backends, err = getSortedBackends("")
+		backends, err = getSortedBackends(kubeconfigPath, true)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"kubeconfigPath": kubeconfigPath,

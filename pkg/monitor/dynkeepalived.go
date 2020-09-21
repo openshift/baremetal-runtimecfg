@@ -19,15 +19,16 @@ import (
 )
 
 const (
-	keepalivedControlSock                      = "/var/run/keepalived/keepalived.sock"
-	cfgKeepalivedChangeThreshold uint8         = 3
-	dummyPortNum                 uint16        = 123
-	unicastPatternInCfgFile                    = "unicast_peer"
-	modeUpdateFilepath                         = "/etc/keepalived/monitor.conf"
-	userModeUpdateFilepath                     = "/etc/keepalived/monitor-user.conf"
-	modeUpdateIntervalInSec      time.Duration = 600
-	processingTimeInSec          uint16        = 30
-	iptablesFilePath                           = "/var/run/keepalived/iptables-rule-exists"
+	keepalivedControlSock                       = "/var/run/keepalived/keepalived.sock"
+	cfgKeepalivedChangeThreshold  uint8         = 3
+	dummyPortNum                  uint16        = 123
+	unicastPatternInCfgFile                     = "unicast_peer"
+	modeUpdateFilepath                          = "/etc/keepalived/monitor.conf"
+	userModeUpdateFilepath                      = "/etc/keepalived/monitor-user.conf"
+	modeUpdateIntervalInSec       time.Duration = 600
+	processingTimeInSec           uint16        = 30
+	iptablesFilePath                            = "/var/run/keepalived/iptables-rule-exists"
+	bootstrapApiFailuresThreshold int           = 4
 )
 
 var (
@@ -142,6 +143,43 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 	return updateRequired, desiredModeInfo
 }
 
+func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan bool) {
+	consecutiveErr := 0
+
+	/* It could take up to ~20 seconds for the local kube-apiserver to start running on the bootstrap node,
+	so before checking if kube-apiserver is not operational we should verify (with a timeout of 30 seconds)
+	first that it's operational. */
+	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
+	for start := time.Now(); time.Since(start) < time.Second*30; {
+		if _, err := config.GetIngressConfig(kubeconfigPath); err == nil {
+			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
+			break
+		}
+		log.Info("handleBootstrapStopKeepalived: local kube-apiserver still not operational")
+		time.Sleep(3 * time.Second)
+	}
+
+	for {
+		if _, err := config.GetIngressConfig(kubeconfigPath); err != nil {
+			consecutiveErr++
+			log.WithFields(logrus.Fields{
+				"consecutiveErr": consecutiveErr,
+			}).Info("handleBootstrapStopKeepalived: detect failure on API")
+		} else {
+			consecutiveErr = 0
+		}
+		if consecutiveErr > bootstrapApiFailuresThreshold {
+			log.WithFields(logrus.Fields{
+				"consecutiveErr":                consecutiveErr,
+				"bootstrapApiFailuresThreshold": bootstrapApiFailuresThreshold,
+			}).Info("handleBootstrapStopKeepalived: Num of failures exceeds threshold")
+			bootstrapStopKeepalived <- true
+			return
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
 func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh chan modeUpdateInfo) {
 
 	// create Ticker that will run every round modeUpdateIntervalInSec
@@ -239,6 +277,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 	updateModeCh := make(chan modeUpdateInfo, 1)
+	bootstrapStopKeepalived := make(chan bool, 1)
 
 	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGINT)
@@ -249,6 +288,14 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh)
 
+	if os.Getenv("IS_BOOTSTRAP") == "yes" {
+		/* When OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP is set to true the bootstrap node won't be destroyed and
+		   Keepalived on the bootstrap continue to run, this behavior might cause problems when unicast keepalived being used,
+		   so, Keepalived on bootstrap should stop running when local kube-apiserver isn't operational anymore.
+		   handleBootstrapStopKeepalived function is responsible to stop Keepalived when the condition is met. */
+		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived)
+	}
+
 	conn, err := net.Dial("unix", keepalivedControlSock)
 	if err != nil {
 		return err
@@ -258,6 +305,25 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		select {
 		case <-done:
 			return nil
+
+		case <-bootstrapStopKeepalived:
+			//Verify that stop message sent successfully
+			for {
+				_, err := conn.Write([]byte("stop\n"))
+				if err == nil {
+					log.Info("Stop message successfully sent to Keepalived container control socket")
+					break
+				}
+				log.WithFields(logrus.Fields{
+					"socket": keepalivedControlSock,
+				}).Error("Failed to write stop to Keepalived container control socket")
+				time.Sleep(1 * time.Second)
+			}
+			for {
+				time.Sleep(20 * time.Second)
+				log.Info("Keepalived watcher sleep forever: API not available")
+			}
+
 		case desiredModeInfo := <-updateModeCh:
 
 			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
