@@ -25,14 +25,14 @@ var nodeIPCmd = &cobra.Command{
 	Use:                   "node-ip",
 	DisableFlagsInUseLine: true,
 	Short:                 "Node IP tools",
-	Long:                  "Node IP has tools that aid in the configuration of nodes in platforms that use Virtual IPs",
+	Long:                  "Node IP has tools that aid in the configuration of the default node IP",
 }
 
 var nodeIPShowCmd = &cobra.Command{
-	Use:                   "show [Virtual IP]",
+	Use:                   "show [Virtual IP...]",
 	DisableFlagsInUseLine: true,
-	Short:                 "Show a configured IP address that directly routes to the given Virtual IPs",
-	Args:                  cobra.MinimumNArgs(1),
+	Short:                 "Show a configured IP address that directly routes to the given Virtual IPs. If no Virtual IPs are provided it will pick an IP associated with the default route.",
+	Args:                  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		err := show(cmd, args)
 		if err != nil {
@@ -42,10 +42,10 @@ var nodeIPShowCmd = &cobra.Command{
 }
 
 var nodeIPSetCmd = &cobra.Command{
-	Use:                   "set [Virtual IP]",
+	Use:                   "set [Virtual IP...]",
 	DisableFlagsInUseLine: true,
-	Short:                 "Sets container runtime services to bind to a configured IP address that directly routes to the given virtual IPs",
-	Args:                  cobra.MinimumNArgs(1),
+	Short:                 "Sets container runtime services to bind to a configured IP address that directly routes to the given virtual IPs. If no Virtual IPs are provided it will pick an IP associated with the default route.",
+	Args:                  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		err := set(cmd, args)
 		if err != nil {
@@ -134,7 +134,14 @@ func set(cmd *cobra.Command, args []string) error {
 
 func getSuitableIP(retry bool, vips []net.IP) (chosen net.IP, err error) {
 	for {
-		nodeAddrs, err := utils.AddressesRouting(vips, utils.NonDeprecatedAddress)
+		var nodeAddrs []net.IP
+		var err error
+
+		if len(vips) > 0 {
+			nodeAddrs, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
+		} else {
+			nodeAddrs, err = utils.AddressesDefault(utils.ValidNodeAddress)
+		}
 		if err != nil {
 			return nil, err
 		}

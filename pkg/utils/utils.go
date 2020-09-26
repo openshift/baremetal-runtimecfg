@@ -205,9 +205,19 @@ func getRouteMap(filter RouteFilter) (routeMap map[int][]netlink.Route, err erro
 	return routeMap, nil
 }
 
-// NonDeprecatedAddress returns true if the address is IPv6 and has a preferred lifetime of 0
-func NonDeprecatedAddress(address netlink.Addr) bool {
-	return !(net.IPv6len == len(address.IP) && address.PreferedLft == 0)
+// ValidNodeAddress returns true if the address is suitable for a node's primary IP
+func ValidNodeAddress(address netlink.Addr) bool {
+	// Ignore link-local addresses
+	if address.IP.IsLinkLocalUnicast() {
+		return false
+	}
+
+	// Ignore deprecated IPv6 addresses
+	if net.IPv6len == len(address.IP) && address.PreferedLft == 0 {
+		return false
+	}
+
+	return true
 }
 
 // usableIPv6Route returns true if the passed route is acceptable for AddressesRouting
@@ -271,6 +281,35 @@ func AddressesRouting(vips []net.IP, af AddressFilter) ([]net.IP, error) {
 			}
 		}
 
+	}
+	return matches, nil
+}
+
+// defaultRoute returns true if the passed route is a default route
+func defaultRoute(route netlink.Route) bool {
+	return route.Dst == nil
+}
+
+// AddressesDefault and returns a slice of configured addresses in the current network namespace associated with default routes. You can optionally pass an AddressFilter to further filter down which addresses are considered
+func AddressesDefault(af AddressFilter) ([]net.IP, error) {
+	addrMap, err := getAddrs(af)
+	if err != nil {
+		return nil, err
+	}
+	routeMap, err := getRouteMap(defaultRoute)
+	if err != nil {
+		return nil, err
+	}
+
+	matches := make([]net.IP, 0)
+	for link, addresses := range addrMap {
+		if routeMap[link.Attrs().Index] == nil {
+			continue
+		}
+		for _, address := range addresses {
+			log.Infof("Address %s is on interface %s with default route", address, link.Attrs().Name)
+			matches = append(matches, address.IP)
+		}
 	}
 	return matches, nil
 }
