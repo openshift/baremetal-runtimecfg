@@ -140,7 +140,7 @@ type AddressFilter func(netlink.Addr) bool
 // RouteFilter is a function type to filter routes
 type RouteFilter func(netlink.Route) bool
 
-func getAddrs() (addrMap map[netlink.Link][]netlink.Addr, err error) {
+func getAddrs(filter AddressFilter) (addrMap map[netlink.Link][]netlink.Addr, err error) {
 	nlHandle, err := netlink.NewHandle(unix.NETLINK_ROUTE)
 	if err != nil {
 		return nil, err
@@ -159,6 +159,11 @@ func getAddrs() (addrMap map[netlink.Link][]netlink.Addr, err error) {
 			return nil, err
 		}
 		for _, address := range addresses {
+			if filter != nil && !filter(address) {
+				log.Debugf("Ignoring filtered address %+v", address)
+				continue
+			}
+
 			if _, ok := addrMap[link]; ok {
 				addrMap[link] = append(addrMap[link], address)
 			} else {
@@ -170,22 +175,22 @@ func getAddrs() (addrMap map[netlink.Link][]netlink.Addr, err error) {
 	return addrMap, nil
 }
 
-func getRouteMap() (routeMap map[int][]netlink.Route, err error) {
+func getRouteMap(filter RouteFilter) (routeMap map[int][]netlink.Route, err error) {
 	nlHandle, err := netlink.NewHandle(unix.NETLINK_ROUTE)
 	if err != nil {
 		return nil, err
 	}
 	defer nlHandle.Delete()
 
-	routes, err := nlHandle.RouteList(nil, netlink.FAMILY_V6)
+	routes, err := nlHandle.RouteList(nil, netlink.FAMILY_ALL)
 	if err != nil {
 		return nil, err
 	}
 
 	routeMap = make(map[int][]netlink.Route)
 	for _, route := range routes {
-		if route.Protocol != unix.RTPROT_RA {
-			log.Debugf("Ignoring route non Router advertisement route %+v", route)
+		if filter != nil && !filter(route) {
+			log.Debugf("Ignoring filtered route %+v", route)
 			continue
 		}
 		if _, ok := routeMap[route.LinkIndex]; ok {
@@ -195,7 +200,7 @@ func getRouteMap() (routeMap map[int][]netlink.Route, err error) {
 		}
 	}
 
-	log.Debugf("Retrieved IPv6 route map %+v", routeMap)
+	log.Debugf("Retrieved route map %+v", routeMap)
 
 	return routeMap, nil
 }
@@ -205,14 +210,27 @@ func NonDeprecatedAddress(address netlink.Addr) bool {
 	return !(net.IPv6len == len(address.IP) && address.PreferedLft == 0)
 }
 
-// NonDefaultRoute returns whether the passed Route is the default
-func NonDefaultRoute(route netlink.Route) bool {
-	return route.Dst != nil
+// usableIPv6Route returns true if the passed route is acceptable for AddressesRouting
+func usableIPv6Route(route netlink.Route) bool {
+	// Ignore default routes
+	if route.Dst == nil {
+		return false
+	}
+	// Ignore non-IPv6 routes
+	if net.IPv6len != len(route.Dst.IP) {
+		return false
+	}
+	// Ignore non-advertised routes
+	if route.Protocol != unix.RTPROT_RA {
+		return false
+	}
+
+	return true
 }
 
-// AddressesRouting takes a slice of Virtual IPs and returns a slice of configured addresses in the current network namespace that directly route to those vips. You can optionally pass an AddressFilter and/or RouteFilter to further filter down which addresses are considered
-func AddressesRouting(vips []net.IP, af AddressFilter, rf RouteFilter) ([]net.IP, error) {
-	addrMap, err := getAddrs()
+// AddressesRouting takes a slice of Virtual IPs and returns a slice of configured addresses in the current network namespace that directly route to those vips. You can optionally pass an AddressFilter to further filter down which addresses are considered
+func AddressesRouting(vips []net.IP, af AddressFilter) ([]net.IP, error) {
+	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
 	}
@@ -222,31 +240,22 @@ func AddressesRouting(vips []net.IP, af AddressFilter, rf RouteFilter) ([]net.IP
 	for link, addresses := range addrMap {
 		for _, address := range addresses {
 			maskPrefix, maskBits := address.Mask.Size()
-			if !af(address) {
-				continue
-			}
 			if net.IPv6len == len(address.IP) && maskPrefix == maskBits {
 				if routeMap == nil {
-					routeMap, err = getRouteMap()
+					routeMap, err = getRouteMap(usableIPv6Route)
 					if err != nil {
 						return nil, err
 					}
 				}
 				if routes, ok := routeMap[link.Attrs().Index]; ok {
 					for _, route := range routes {
-						if !rf(route) {
-							continue
-						}
-						routePrefix, _ := route.Dst.Mask.Size()
 						log.Infof("Checking route %+v (mask %s) for address %+v", route, route.Dst.Mask, address)
-						if routePrefix != 0 {
-							containmentNet := net.IPNet{IP: address.IP, Mask: route.Dst.Mask}
-							for _, vip := range vips {
-								log.Infof("Checking whether address %s with route %s contains VIP %s", address, route, vip)
-								if containmentNet.Contains(vip) {
-									log.Infof("Address %s with route %s contains VIP %s", address, route, vip)
-									matches = append(matches, address.IP)
-								}
+						containmentNet := net.IPNet{IP: address.IP, Mask: route.Dst.Mask}
+						for _, vip := range vips {
+							log.Infof("Checking whether address %s with route %s contains VIP %s", address, route, vip)
+							if containmentNet.Contains(vip) {
+								log.Infof("Address %s with route %s contains VIP %s", address, route, vip)
+								matches = append(matches, address.IP)
 							}
 						}
 					}

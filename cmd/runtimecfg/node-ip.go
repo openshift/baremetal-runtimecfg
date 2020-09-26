@@ -134,7 +134,7 @@ func set(cmd *cobra.Command, args []string) error {
 
 func getSuitableIP(retry bool, vips []net.IP) (chosen net.IP, err error) {
 	for {
-		nodeAddrs, err := utils.AddressesRouting(vips, utils.NonDeprecatedAddress, utils.NonDefaultRoute)
+		nodeAddrs, err := utils.AddressesRouting(vips, utils.NonDeprecatedAddress)
 		if err != nil {
 			return nil, err
 		}
