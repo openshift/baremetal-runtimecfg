@@ -31,6 +31,13 @@ const (
 	bootstrapApiFailuresThreshold int           = 4
 )
 
+type APIState uint8
+
+const (
+	stopped APIState = iota
+	started APIState = iota
+)
+
 var (
 	gBootstrapIP string
 )
@@ -143,7 +150,7 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 	return updateRequired, desiredModeInfo
 }
 
-func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan bool) {
+func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState) {
 	consecutiveErr := 0
 
 	/* It could take up to ~20 seconds for the local kube-apiserver to start running on the bootstrap node,
@@ -166,6 +173,9 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 				"consecutiveErr": consecutiveErr,
 			}).Info("handleBootstrapStopKeepalived: detect failure on API")
 		} else {
+			if consecutiveErr > bootstrapApiFailuresThreshold { // Means it was stopped
+				bootstrapStopKeepalived <- started
+			}
 			consecutiveErr = 0
 		}
 		if consecutiveErr > bootstrapApiFailuresThreshold {
@@ -173,8 +183,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 				"consecutiveErr":                consecutiveErr,
 				"bootstrapApiFailuresThreshold": bootstrapApiFailuresThreshold,
 			}).Info("handleBootstrapStopKeepalived: Num of failures exceeds threshold")
-			bootstrapStopKeepalived <- true
-			return
+			bootstrapStopKeepalived <- stopped
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -277,7 +286,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 	updateModeCh := make(chan modeUpdateInfo, 1)
-	bootstrapStopKeepalived := make(chan bool, 1)
+	bootstrapStopKeepalived := make(chan APIState, 1)
 
 	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGINT)
@@ -306,22 +315,24 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		case <-done:
 			return nil
 
-		case <-bootstrapStopKeepalived:
+		case APIStateChanged := <-bootstrapStopKeepalived:
 			//Verify that stop message sent successfully
 			for {
-				_, err := conn.Write([]byte("stop\n"))
+				var cmdMsg []byte
+				if APIStateChanged == stopped {
+					cmdMsg = []byte("stop\n")
+				} else {
+					cmdMsg = []byte("reload\n")
+				}
+				_, err := conn.Write(cmdMsg)
 				if err == nil {
-					log.Info("Stop message successfully sent to Keepalived container control socket")
+					log.Infof("Command message successfully sent to Keepalived container control socket: %s", string(cmdMsg[:]))
 					break
 				}
 				log.WithFields(logrus.Fields{
 					"socket": keepalivedControlSock,
-				}).Error("Failed to write stop to Keepalived container control socket")
+				}).Error("Failed to write command to Keepalived container control socket")
 				time.Sleep(1 * time.Second)
-			}
-			for {
-				time.Sleep(20 * time.Second)
-				log.Info("Keepalived watcher sleep forever: API not available")
 			}
 
 		case desiredModeInfo := <-updateModeCh:
