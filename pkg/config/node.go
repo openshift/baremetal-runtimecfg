@@ -234,7 +234,9 @@ func IsUpgradeStillRunning(kubeconfigPath string) (error, bool) {
 	}
 
 	for _, node := range nodes.Items {
-		if node.Annotations["machineconfiguration.openshift.io/desiredConfig"] != node.Annotations["machineconfiguration.openshift.io/currentConfig"] {
+		if node.Annotations["machineconfiguration.openshift.io/desiredConfig"] != node.Annotations["machineconfiguration.openshift.io/currentConfig"] ||
+			node.Annotations["machineconfiguration.openshift.io/desiredConfig"] != nodes.Items[0].Annotations["machineconfiguration.openshift.io/desiredConfig"] {
+
 			return nil, true
 		}
 	}
