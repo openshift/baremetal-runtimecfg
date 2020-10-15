@@ -53,7 +53,7 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, 
 	for {
 		select {
 		case <-done:
-			cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
+			cleanHAProxyFirewallRules(apiVip, apiPort, lbPort)
 			return nil
 		default:
 			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, net.ParseIP(apiVip))
@@ -111,15 +111,15 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, 
 				if oldK8sHealthSts != K8sHealthSts {
 					log.Info("API is reachable through HAProxy")
 				}
-				err := ensureHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
+				err := ensureHAProxyFirewallRules(apiVip, apiPort, lbPort)
 				if err != nil {
-					log.WithFields(logrus.Fields{"err": err}).Error("Failed to ensure HAProxy PREROUTING rule to direct traffic to the LB")
+					log.WithFields(logrus.Fields{"err": err}).Error("Failed to ensure HAProxy firewall rules to direct traffic to the LB")
 				}
 			} else {
 				if oldK8sHealthSts != K8sHealthSts {
 					log.Info("API is not reachable through HAProxy")
 				}
-				cleanHAProxyPreRoutingRule(apiVip, apiPort, lbPort)
+				cleanHAProxyFirewallRules(apiVip, apiPort, lbPort)
 			}
 			time.Sleep(interval)
 		}
