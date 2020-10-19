@@ -8,3 +8,5 @@ approvers:
   - cybertron
   - bcrochet
   - yboaron
+component: Networking
+subcomponent: runtime-cfg
