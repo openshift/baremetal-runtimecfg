@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
-func GetInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
+func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	if len(vips) < 1 {
 		return vipIface, nonVipAddr, fmt.Errorf("At least one VIP needs to be fed to this function")
 	}
@@ -22,6 +24,9 @@ func GetInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 
 	for _, iface := range ifaces {
 		addrs, err := iface.Addrs()
+		if err != nil {
+			return vipIface, nonVipAddr, err
+		}
 		for _, addr := range addrs {
 			switch n := addr.(type) {
 			case *net.IPNet:
@@ -34,7 +39,7 @@ func GetInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 				_, nn, _ := net.ParseCIDR(strings.Replace(addr.String(), "/128", "/64", 1))
 
 				if nn.Contains(vips[0]) {
-					return iface, n, err
+					return iface, n, nil
 				}
 			default:
 				fmt.Println("not supported addr")
@@ -42,5 +47,28 @@ func GetInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 		}
 	}
 
-	return vipIface, nonVipAddr, fmt.Errorf("No interface nor address found for the given VIPs")
+	nodeAddrs, err := utils.AddressesDefault(utils.ValidNodeAddress)
+	if err != nil {
+		return vipIface, nonVipAddr, err
+	}
+	if len(nodeAddrs) == 0 {
+		return vipIface, nonVipAddr, fmt.Errorf("No interface nor address found")
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return vipIface, nonVipAddr, err
+		}
+		for _, addr := range addrs {
+			switch n := addr.(type) {
+			case *net.IPNet:
+				if n.IP.String() == nodeAddrs[0].String() {
+					return iface, n, nil
+				}
+			default:
+				fmt.Println("not supported addr")
+			}
+		}
+	}
+	return vipIface, nonVipAddr, fmt.Errorf("No interface nor address found")
 }
