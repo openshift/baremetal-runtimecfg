@@ -31,7 +31,7 @@ var nodeIPCmd = &cobra.Command{
 var nodeIPShowCmd = &cobra.Command{
 	Use:                   "show [Virtual IP...]",
 	DisableFlagsInUseLine: true,
-	Short:                 "Show a configured IP address that directly routes to the given Virtual IPs. If no Virtual IPs are provided it will pick an IP associated with the default route.",
+	Short:                 "Show a configured IP address that directly routes to the given Virtual IPs. If no Virtual IPs are provided or if the node isn't attached to the VIP subnet, it will pick an IP associated with the default route.",
 	Args:                  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		err := show(cmd, args)
@@ -44,7 +44,7 @@ var nodeIPShowCmd = &cobra.Command{
 var nodeIPSetCmd = &cobra.Command{
 	Use:                   "set [Virtual IP...]",
 	DisableFlagsInUseLine: true,
-	Short:                 "Sets container runtime services to bind to a configured IP address that directly routes to the given virtual IPs. If no Virtual IPs are provided it will pick an IP associated with the default route.",
+	Short:                 "Sets container runtime services to bind to a configured IP address that directly routes to the given virtual IPs. If no Virtual IPs are provided or if the node isn't attached to the VIP subnet, it will pick an IP associated with the default route.",
 	Args:                  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		err := set(cmd, args)
@@ -139,13 +139,16 @@ func getSuitableIP(retry bool, vips []net.IP) (chosen net.IP, err error) {
 
 		if len(vips) > 0 {
 			nodeAddrs, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
-		} else {
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(nodeAddrs) == 0 {
 			nodeAddrs, err = utils.AddressesDefault(utils.ValidNodeAddress)
+			if err != nil {
+				return nil, err
+			}
 		}
-		if err != nil {
-			return nil, err
-		}
-
 		if len(nodeAddrs) > 0 {
 			chosen = nodeAddrs[0]
 			break
