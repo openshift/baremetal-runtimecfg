@@ -38,10 +38,6 @@ const (
 	started APIState = iota
 )
 
-var (
-	gBootstrapIP string
-)
-
 func getActualMode(cfgPath string) (error, bool) {
 	enableUnicast := false
 	_, err := os.Stat(cfgPath)
@@ -67,9 +63,6 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 	if !newConfig.EnableUnicast {
 		return
 	}
-	retrieveBootstrapIpAddr(newConfig.Cluster.APIVIP)
-	newConfig.BootstrapIP = gBootstrapIP
-
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
@@ -93,23 +86,6 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 		}
 	}
 	return cfgChanged && validConfig
-}
-
-func retrieveBootstrapIpAddr(apiVip string) {
-	var err error
-
-	if gBootstrapIP != "" {
-		return
-	}
-	// we don't need to read the bootstrap IP address for bootstrap node
-	if os.Getenv("IS_BOOTSTRAP") == "yes" {
-		gBootstrapIP = ""
-		return
-	}
-	gBootstrapIP, err = config.GetBootstrapIP(apiVip)
-	if err != nil {
-		log.Debugf("Could not retrieve bootstrap IP: %v", err)
-	}
 }
 
 type modeUpdateInfo struct {

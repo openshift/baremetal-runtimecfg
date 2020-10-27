@@ -10,7 +10,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
@@ -24,7 +23,6 @@ import (
 )
 
 const localhostKubeApiServerUrl string = "https://localhost:6443"
-const bootstrapIpServerPort string = "64444"
 
 var log = logrus.New()
 
@@ -71,7 +69,6 @@ type Node struct {
 	EtcdShortHostname string
 	VRRPInterface     string
 	DNSUpstreams      []string
-	BootstrapIP       string
 	IngressConfig     IngressConfig
 	EnableUnicast     bool
 }
@@ -180,26 +177,6 @@ func (c *Cluster) PopulateVRIDs() error {
 		c.IngressVirtualRouterID++
 	}
 	return nil
-}
-func GetBootstrapIP(apiVip string) (bootstrapIP string, err error) {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(apiVip, bootstrapIpServerPort), 10*time.Second)
-	if err != nil {
-		log.Debugf("An error occurred on dial: %v", err)
-		return "", err
-	}
-	defer conn.Close()
-
-	bootstrapIP, err = bufio.NewReader(conn).ReadString('\n')
-	if err != nil {
-		log.Infof("An error occurred on read: %v", err)
-		return "", err
-	}
-
-	bootstrapIP = strings.TrimSpace(bootstrapIP)
-
-	log.Infof("Got bootstrap IP %v", bootstrapIP)
-
-	return bootstrapIP, err
 }
 
 func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
