@@ -34,6 +34,27 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	}
 	defer renderFile.Close()
 
+	// NOTE For some reason, the template file for keepalived.conf has the
+	// executable bit set. Let's skip it because keepalived refuses to
+	// start when its configuration file is executable.
+	if renderPath != "/etc/keepalived/keepalived.conf" {
+		// Make sure we propagate any special permissions
+		templateStat, err := os.Stat(templatePath)
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"path": templatePath,
+			}).Error("Failed to stat template")
+			return err
+		}
+		err = os.Chmod(renderPath, templateStat.Mode())
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"path": renderPath,
+			}).Error("Failed to set permissions on file")
+			return err
+		}
+	}
+
 	log.WithFields(logrus.Fields{
 		"path": renderPath,
 	}).Info("Runtimecfg rendering template")

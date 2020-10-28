@@ -12,9 +12,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const keepalivedControlSock = "/var/run/keepalived/keepalived.sock"
+const (
+	keepalivedControlSock = "/var/run/keepalived/keepalived.sock"
+	iptablesFilePath      = "/var/run/keepalived/iptables-rule-exists"
+)
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var prevConfig *config.Node
 
 	signals := make(chan os.Signal, 1)
@@ -63,6 +66,30 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				}
 			}
 			prevConfig = &newConfig
+
+			// Signal to keepalived whether the haproxy firewall rule is in place
+			ruleExists, err := checkHAProxyFirewallRules(apiVip.String(), apiPort, lbPort)
+			if err != nil {
+				log.Error("Failed to check for haproxy firewall rule")
+			} else {
+				_, err := os.Stat(iptablesFilePath)
+				fileExists := !os.IsNotExist(err)
+				if ruleExists {
+					if !fileExists {
+						_, err := os.Create(iptablesFilePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to create file")
+						}
+					}
+				} else {
+					if fileExists {
+						err := os.Remove(iptablesFilePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to remove file")
+						}
+					}
+				}
+			}
 			time.Sleep(interval)
 		}
 	}
