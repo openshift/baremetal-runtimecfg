@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -146,12 +147,16 @@ func LeaseVIP(log logrus.FieldLogger, cfgPath, masterDevice, name string, mac ne
 
 	// -sf avoiding dhclient from setting the received IP to the interface
 	// --no-pid in order to allow running multiple `dhclient` simultaneously
-	cmd := exec.Command("dhclient", "-v", iface.Name, "-H", name,
+	cmd := exec.Command("dhclient", "-v", iface.Name, "-H", formatHostname(mac.String(), name),
 		"-sf", "/bin/true", "-lf", leaseFile, "-d", "--no-pid")
 	cmd.Stderr = os.Stderr
 
 	RunInfiniteWatcher(log, watcher, leaseFile, iface.Name, ip)
 	return cmd.Start()
+}
+
+func formatHostname(mac string, suffix string) string {
+	return fmt.Sprintf("%s-%s", strings.ReplaceAll(mac, ":", "-"), suffix)
 }
 
 func GetLastLeaseFromFile(log logrus.FieldLogger, fileName string) (string, string, error) {
