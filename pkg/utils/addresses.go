@@ -13,6 +13,9 @@ type AddressFilter func(netlink.Addr) bool
 // RouteFilter is a function type to filter routes
 type RouteFilter func(netlink.Route) bool
 
+type addressMapFunc func(filter AddressFilter) (map[netlink.Link][]netlink.Addr, error)
+type routeMapFunc func(filter RouteFilter) (map[int][]netlink.Route, error)
+
 func getAddrs(filter AddressFilter) (addrMap map[netlink.Link][]netlink.Addr, err error) {
 	nlHandle, err := netlink.NewHandle(unix.NETLINK_ROUTE)
 	if err != nil {
@@ -113,6 +116,10 @@ func usableIPv6Route(route netlink.Route) bool {
 
 // AddressesRouting takes a slice of Virtual IPs and returns a slice of configured addresses in the current network namespace that directly route to those vips. You can optionally pass an AddressFilter to further filter down which addresses are considered
 func AddressesRouting(vips []net.IP, af AddressFilter) ([]net.IP, error) {
+	return addressesRoutingInternal(vips, af, getAddrs, getRouteMap)
+}
+
+func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
@@ -165,6 +172,10 @@ func defaultRoute(route netlink.Route) bool {
 
 // AddressesDefault and returns a slice of configured addresses in the current network namespace associated with default routes. You can optionally pass an AddressFilter to further filter down which addresses are considered
 func AddressesDefault(af AddressFilter) ([]net.IP, error) {
+	return addressesDefaultInternal(af, getAddrs, getRouteMap)
+}
+
+func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
