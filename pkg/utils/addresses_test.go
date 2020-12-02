@@ -161,7 +161,7 @@ var _ = Describe("addresses", func() {
 			ipv4RouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("10.0.0.100")}))
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
 	})
 
 	It("matches an IPv4 VIP on the secondary interface", func() {
@@ -183,7 +183,7 @@ var _ = Describe("addresses", func() {
 			ipv4RouteMapDefaultEth1,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("10.0.0.100")}))
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
 	})
 
 	It("matches an IPv6 VIP on the primary interface", func() {
@@ -216,7 +216,7 @@ var _ = Describe("addresses", func() {
 			dualStackRouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("10.0.0.100")}))
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}))
 	})
 
 	It("matches an IPv6 VIP on a dual-stack interface", func() {
@@ -227,7 +227,7 @@ var _ = Describe("addresses", func() {
 			dualStackRouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd01::5")}))
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd01::5"), net.ParseIP("192.168.1.2")}))
 	})
 
 	It("finds an interface with a default route in an IPv4 cluster", func() {
@@ -237,7 +237,7 @@ var _ = Describe("addresses", func() {
 			ipv4RouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("10.0.0.100")}))
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
 	})
 
 	It("finds an interface with a default route when that's not the first interface", func() {
@@ -267,7 +267,7 @@ var _ = Describe("addresses", func() {
 			dualStackRouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("10.0.0.100"), net.ParseIP("fd00::5")}))
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}))
 	})
 })
 
