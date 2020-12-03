@@ -68,13 +68,13 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddress, err := getSuitableIP(retry, vips)
+	chosenAddresses, err := getSuitableIPs(retry, vips)
 	if err != nil {
 		return err
 	}
-	log.Infof("Chosen Node IP %s", chosenAddress)
+	log.Infof("Chosen Node IPs: %v", chosenAddresses)
 
-	fmt.Println(chosenAddress)
+	fmt.Println(chosenAddresses[0])
 	return nil
 }
 
@@ -84,11 +84,11 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddress, err := getSuitableIP(retry, vips)
+	chosenAddresses, err := getSuitableIPs(retry, vips)
 	if err != nil {
 		return err
 	}
-	log.Infof("Chosen Node IP %s", chosenAddress)
+	log.Infof("Chosen Node IPs: %v", chosenAddresses)
 
 	// Kubelet
 	kubeletOverrideDir := filepath.Dir(kubeletSvcOverridePath)
@@ -103,7 +103,12 @@ func set(cmd *cobra.Command, args []string) error {
 	}
 	defer kOverride.Close()
 
-	kOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"KUBELET_NODE_IP=%s\"\n", chosenAddress)
+	nodeIP := chosenAddresses[0].String()
+	nodeIPs := nodeIP
+	if len(chosenAddresses) > 1 {
+		nodeIPs += "," + chosenAddresses[1].String()
+	}
+	kOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"KUBELET_NODE_IP=%s\" \"KUBELET_NODE_IPS=%s\"\n", nodeIP, nodeIPs)
 	log.Infof("Writing Kubelet service override with content %s", kOverrideContent)
 	_, err = kOverride.WriteString(kOverrideContent)
 	if err != nil {
@@ -123,7 +128,7 @@ func set(cmd *cobra.Command, args []string) error {
 	}
 	defer cOverride.Close()
 
-	cOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"CONTAINER_STREAM_ADDRESS=%s\"\n", chosenAddress)
+	cOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"CONTAINER_STREAM_ADDRESS=%s\"\n", chosenAddresses[0])
 	log.Infof("Writing CRI-O service override with content %s", cOverrideContent)
 	_, err = cOverride.WriteString(cOverrideContent)
 	if err != nil {
@@ -132,26 +137,18 @@ func set(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getSuitableIP(retry bool, vips []net.IP) (chosen net.IP, err error) {
+func getSuitableIPs(retry bool, vips []net.IP) (chosen []net.IP, err error) {
 	for {
-		var nodeAddrs []net.IP
-		var err error
-
 		if len(vips) > 0 {
-			nodeAddrs, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
-			if err != nil {
-				return nil, err
+			chosen, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
+			if len(chosen) > 0 || err != nil {
+				return chosen, err
 			}
-		}
-		if len(nodeAddrs) == 0 {
-			nodeAddrs, err = utils.AddressesDefault(utils.ValidNodeAddress)
-			if err != nil {
-				return nil, err
+		} else {
+			chosen, err = utils.AddressesDefault(utils.ValidNodeAddress)
+			if len(chosen) > 0 || err != nil {
+				return chosen, err
 			}
-		}
-		if len(nodeAddrs) > 0 {
-			chosen = nodeAddrs[0]
-			break
 		}
 		if !retry {
 			return nil, fmt.Errorf("Failed to find node IP")
@@ -160,7 +157,6 @@ func getSuitableIP(retry bool, vips []net.IP) (chosen net.IP, err error) {
 		log.Errorf("Failed to find a suitable node IP")
 		time.Sleep(time.Second)
 	}
-	return
 }
 
 func parseIPs(args []string) ([]net.IP, error) {
