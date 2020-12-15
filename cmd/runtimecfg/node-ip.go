@@ -144,7 +144,8 @@ func getSuitableIPs(retry bool, vips []net.IP) (chosen []net.IP, err error) {
 			if len(chosen) > 0 || err != nil {
 				return chosen, err
 			}
-		} else {
+		}
+		if len(chosen) == 0 {
 			chosen, err = utils.AddressesDefault(utils.ValidNodeAddress)
 			if len(chosen) > 0 || err != nil {
 				return chosen, err
