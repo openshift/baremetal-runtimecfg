@@ -144,12 +144,12 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 				}
 				if routes, ok := routeMap[link.Attrs().Index]; ok {
 					for _, route := range routes {
-						log.Infof("Checking route %+v (mask %s) for address %+v", route, route.Dst.Mask, address)
+						log.Debugf("Checking route %+v (mask %s) for address %+v", route, route.Dst.Mask, address)
 						containmentNet := net.IPNet{IP: address.IP, Mask: route.Dst.Mask}
 						for _, vip := range vips {
-							log.Infof("Checking whether address %s with route %s contains VIP %s", address, route, vip)
+							log.Debugf("Checking whether address %s with route %s contains VIP %s", address, route, vip)
 							if containmentNet.Contains(vip) {
-								log.Infof("Address %s with route %s contains VIP %s", address, route, vip)
+								log.Debugf("Address %s with route %s contains VIP %s", address, route, vip)
 								matches = append(matches, address.IP)
 								break addrLoop
 							}
@@ -158,9 +158,9 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 				}
 			} else {
 				for _, vip := range vips {
-					log.Infof("Checking whether address %s contains VIP %s", address, vip)
+					log.Debugf("Checking whether address %s contains VIP %s", address, vip)
 					if address.Contains(vip) {
-						log.Infof("Address %s contains VIP %s", address, vip)
+						log.Debugf("Address %s contains VIP %s", address, vip)
 						matches = append(matches, address.IP)
 						break addrLoop
 					}
@@ -212,7 +212,7 @@ func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRout
 				continue
 			}
 
-			log.Infof("Address %s is on interface %s with default route", address, link.Attrs().Name)
+			log.Debugf("Address %s is on interface %s with default route", address, link.Attrs().Name)
 			matches = append(matches, address.IP)
 		}
 	}
