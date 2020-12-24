@@ -33,13 +33,17 @@ func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 				if _, ok := vipMap[n.IP.String()]; ok {
 					continue // This is a VIP, let's skip
 				}
-				// FIXME: Breaks if more then one interface on the host has the same prefix
-				// DHCPv6 assigns addresses with a /128 if encountered assume /64
-				// so that the n.Contains returns true if the VIP has the same prefix
 				_, nn, _ := net.ParseCIDR(strings.Replace(addr.String(), "/128", "/64", 1))
 
 				if nn.Contains(vips[0]) {
-					return iface, n, nil
+					// Since IPV6 subnet is set to /64 we should also verify that
+					// the candidate address and VIP address are L2 connected.
+					// To make sure that the correct interface being chosen for cases like:
+					// 2 interfaces , subnetA: 1001:db8::/120 , subnetB: 1001:db8::f00/120 and VIP address  1001:db8::64
+					nodeAddrs, err := utils.AddressesRouting(vips, utils.ValidNodeAddress)
+					if err == nil && len(nodeAddrs) > 0 && n.IP.Equal(nodeAddrs[0]) {
+						return iface, n, nil
+					}
 				}
 			default:
 				fmt.Println("not supported addr")

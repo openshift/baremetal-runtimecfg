@@ -16,6 +16,10 @@ import (
 
 var log = logrus.New()
 
+func SetDebugLogLevel() {
+	log.SetLevel(logrus.DebugLevel)
+}
+
 func FletcherChecksum8(inp string) uint8 {
 	var ckA, ckB uint8
 	for i := 0; i < len(inp); i++ {

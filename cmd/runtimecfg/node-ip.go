@@ -138,6 +138,8 @@ func set(cmd *cobra.Command, args []string) error {
 }
 
 func getSuitableIPs(retry bool, vips []net.IP) (chosen []net.IP, err error) {
+	// Enable debug logging in utils package
+	utils.SetDebugLogLevel()
 	for {
 		if len(vips) > 0 {
 			chosen, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
