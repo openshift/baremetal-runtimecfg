@@ -21,15 +21,15 @@ services:
       - dhcp
 
   dhcpd:
-    image: networkboot/dhcpd
+    image: quay.io/cloudctl/dhcp:ubi
     cap_add:
-      - cap_net_raw
+      - NET_ADMIN
     volumes:
-      - ${PWD}/test/data:/data
+      - ${PWD}/test/data/:/etc/dhcp:z
     networks:
       dhcp:
         ipv4_address: 172.99.0.2
-    command: eth0
+    command: ["-f", "-cf", "/etc/dhcp/dhcpd.conf", "-user", "root", "-group", "root", "--no-pid"]
 
 networks:
   dhcp:
