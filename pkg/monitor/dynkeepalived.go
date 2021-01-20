@@ -65,11 +65,13 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 	}
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
 	if err != nil {
+		newConfig.IngressConfig = appliedConfig.IngressConfig
 		log.Warnf("Could not retrieve ingress config: %v", err)
 	}
 
 	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(newConfig.Cluster.APIVIP))
 	if err != nil {
+		newConfig.LBConfig = appliedConfig.LBConfig
 		log.Warnf("Could not retrieve LB config: %v", err)
 	}
 }
@@ -81,8 +83,15 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	// we want to apply new config to master nodes only after nodes appears in etcd, with this
 	// approach we should avoid asymetric configuration
 	if curConfig.EnableUnicast {
-		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) == 0 {
-			validConfig = false
+		if os.Getenv("IS_BOOTSTRAP") == "no" {
+			localNodeInBEList := false
+			for _, be := range curConfig.LBConfig.Backends {
+				if curConfig.NonVirtualIP == be.Address {
+					localNodeInBEList = true
+					break
+				}
+			}
+			validConfig = validConfig && localNodeInBEList
 		}
 	}
 	return cfgChanged && validConfig
