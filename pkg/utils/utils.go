@@ -87,6 +87,7 @@ func IsKubernetesHealthy(port uint16) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	defer client.CloseIdleConnections()
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
