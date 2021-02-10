@@ -5,6 +5,7 @@ RUN GO111MODULE=on go build --mod=vendor -o runtimecfg ./cmd/runtimecfg
 RUN GO111MODULE=on go build --mod=vendor cmd/dynkeepalived/dynkeepalived.go
 RUN GO111MODULE=on go build --mod=vendor cmd/corednsmonitor/corednsmonitor.go
 RUN GO111MODULE=on go build --mod=vendor cmd/monitor/monitor.go
+RUN GO111MODULE=on go build --mod=vendor cmd/dnsmasqmonitor/dnsmasqmonitor.go
 
 FROM centos:8
 
@@ -14,6 +15,7 @@ COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/runtimecfg
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/monitor /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/dynkeepalived /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/corednsmonitor /usr/bin
+COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/dnsmasqmonitor /usr/bin
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/* /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/ip*tables /usr/sbin/
 
