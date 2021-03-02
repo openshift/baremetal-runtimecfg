@@ -1,4 +1,4 @@
-FROM registry.svc.ci.openshift.org/openshift/release:golang-1.13 AS builder
+FROM registry.ci.openshift.org/openshift/release:golang-1.13 AS builder
 WORKDIR /go/src/github.com/openshift/baremetal-runtimecfg
 COPY . .
 RUN GO111MODULE=on go build --mod=vendor -o runtimecfg ./cmd/runtimecfg
