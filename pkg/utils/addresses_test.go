@@ -45,7 +45,7 @@ func maybeAddAddress(addrMap map[netlink.Link][]netlink.Addr, af AddressFilter, 
 	addrMap[link] = append(addrMap[link], *addr)
 }
 
-func maybeAddRoute(routeMap map[int][]netlink.Route, rf RouteFilter, link netlink.Link, destination string, ra bool) {
+func maybeAddRoute(routeMap map[int][]netlink.Route, rf RouteFilter, link netlink.Link, destination string, ra bool, priority int) {
 	var dst *net.IPNet
 	var err error
 	if destination != "" {
@@ -63,6 +63,7 @@ func maybeAddRoute(routeMap map[int][]netlink.Route, rf RouteFilter, link netlin
 		LinkIndex: linkIndex,
 		Dst:       dst,
 		Protocol:  prot,
+		Priority:  priority,
 	}
 	if rf != nil && !rf(route) {
 		return
@@ -80,15 +81,15 @@ func addIPv4Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
 }
 
 func addIPv4Routes(routes map[int][]netlink.Route, rf RouteFilter) {
-	maybeAddRoute(routes, rf, eth0, "", false)
-	maybeAddRoute(routes, rf, eth0, "10.0.0.0/24", false)
-	maybeAddRoute(routes, rf, eth1, "192.168.1.0/24", false)
+	maybeAddRoute(routes, rf, eth0, "", false, 100)
+	maybeAddRoute(routes, rf, eth0, "10.0.0.0/24", false, 100)
+	maybeAddRoute(routes, rf, eth1, "192.168.1.0/24", false, 100)
 }
 
 func addIPv4RoutesDefaultEth1(routes map[int][]netlink.Route, rf RouteFilter) {
-	maybeAddRoute(routes, rf, eth0, "10.0.0.0/24", false)
-	maybeAddRoute(routes, rf, eth1, "", false)
-	maybeAddRoute(routes, rf, eth1, "192.168.1.0/24", false)
+	maybeAddRoute(routes, rf, eth0, "10.0.0.0/24", false, 100)
+	maybeAddRoute(routes, rf, eth1, "", false, 100)
+	maybeAddRoute(routes, rf, eth1, "192.168.1.0/24", false, 100)
 }
 
 func addIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
@@ -102,10 +103,10 @@ func addIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
 }
 
 func addIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
-	maybeAddRoute(routes, rf, eth0, "", false)
-	maybeAddRoute(routes, rf, eth0, "fd00::/64", false)
-	maybeAddRoute(routes, rf, eth0, "fd02::/64", false)
-	maybeAddRoute(routes, rf, eth1, "fd01::/64", false)
+	maybeAddRoute(routes, rf, eth0, "", false, 100)
+	maybeAddRoute(routes, rf, eth0, "fd00::/64", false, 100)
+	maybeAddRoute(routes, rf, eth0, "fd02::/64", false, 100)
+	maybeAddRoute(routes, rf, eth1, "fd01::/64", false, 100)
 }
 
 func addOverlappingIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
@@ -119,10 +120,20 @@ func addOverlappingIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFi
 }
 
 func addOverlappingIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
-	maybeAddRoute(routes, rf, eth0, "", false)
-	maybeAddRoute(routes, rf, eth0, "fd00::f00/120", false)
-	maybeAddRoute(routes, rf, eth0, "fd00::e00/120", false)
-	maybeAddRoute(routes, rf, eth1, "fd00::/120", false)
+	maybeAddRoute(routes, rf, eth0, "", false, 100)
+	maybeAddRoute(routes, rf, eth0, "fd00::f00/120", false, 100)
+	maybeAddRoute(routes, rf, eth0, "fd00::e00/120", false, 100)
+	maybeAddRoute(routes, rf, eth1, "fd00::/120", false, 100)
+}
+
+func addMultipleDefaultRoutes(routes map[int][]netlink.Route, rf RouteFilter) {
+	maybeAddRoute(routes, rf, eth0, "", false, 100)
+	maybeAddRoute(routes, rf, eth1, "", false, 101)
+}
+
+func addMultipleDefaultRoutesReversePriority(routes map[int][]netlink.Route, rf RouteFilter) {
+	maybeAddRoute(routes, rf, eth0, "", false, 101)
+	maybeAddRoute(routes, rf, eth1, "", false, 100)
 }
 
 func ipv4AddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
@@ -192,6 +203,18 @@ func overlappingDualStackRouteMap(rf RouteFilter) (map[int][]netlink.Route, erro
 	routes := make(map[int][]netlink.Route)
 	addIPv4Routes(routes, rf)
 	addOverlappingIPv6Routes(routes, rf)
+	return routes, nil
+}
+
+func multipleDefaultRouteMap(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	addMultipleDefaultRoutes(routes, rf)
+	return routes, nil
+}
+
+func multipleDefaultRouteMapReversePriority(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	addMultipleDefaultRoutesReversePriority(routes, rf)
 	return routes, nil
 }
 
@@ -375,6 +398,26 @@ var _ = Describe("addresses", func() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::f05")}))
+	})
+
+	It("handles multiple default routes consistently", func() {
+		addrs, err := addressesDefaultInternal(
+			ValidNodeAddress,
+			ipv4AddrMap,
+			multipleDefaultRouteMap,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
+	})
+
+	It("handles multiple default routes consistently opposite priority", func() {
+		addrs, err := addressesDefaultInternal(
+			ValidNodeAddress,
+			ipv4AddrMap,
+			multipleDefaultRouteMapReversePriority,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("192.168.1.2")}))
 	})
 })
 
