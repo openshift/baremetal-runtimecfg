@@ -2,6 +2,7 @@ package utils
 
 import (
 	"net"
+	"sort"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -192,6 +193,11 @@ func AddressesDefault(af AddressFilter) ([]net.IP, error) {
 	return addressesDefaultInternal(af, getAddrs, getRouteMap)
 }
 
+type AddressPriority struct {
+	Address  net.IP
+	Priority int
+}
+
 func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
@@ -203,17 +209,34 @@ func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRout
 	}
 
 	matches := make([]net.IP, 0)
+	priorities := make([]AddressPriority, 0)
 	for link, addresses := range addrMap {
 		if routeMap[link.Attrs().Index] == nil {
 			continue
 		}
 		for _, address := range addresses {
-			if len(matches) > 0 && (isIPv6(address.IP) == isIPv6(matches[0])) {
-				continue
-			}
-
 			log.Debugf("Address %s is on interface %s with default route", address, link.Attrs().Name)
-			matches = append(matches, address.IP)
+			// We should only have one default route per interface
+			priorities = append(priorities, AddressPriority{address.IP, routeMap[link.Attrs().Index][0].Priority})
+		}
+	}
+	// Ensure that we always return addresses sorted by the priority of their
+	// associated default route. Otherwise the order of the addresses we return
+	// may change if an address moves to a bridge (for example).
+	sort.SliceStable(priorities, func(i, j int) bool {
+		return priorities[i].Priority < priorities[j].Priority
+	})
+	foundv4 := false
+	foundv6 := false
+	for _, ap := range priorities {
+		if (isIPv6(ap.Address) && foundv6) || (!isIPv6(ap.Address) && foundv4) {
+			continue
+		}
+		matches = append(matches, ap.Address)
+		if isIPv6(ap.Address) {
+			foundv6 = true
+		} else {
+			foundv4 = true
 		}
 	}
 	return matches, nil
