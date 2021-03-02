@@ -27,10 +27,6 @@ func main() {
 			if err != nil {
 				ingressVip = nil
 			}
-			dnsVip, err := cmd.Flags().GetIP("dns-vip")
-			if err != nil {
-				dnsVip = nil
-			}
 
 			checkInterval, err := cmd.Flags().GetDuration("check-interval")
 			if err != nil {
@@ -41,14 +37,13 @@ func main() {
 				return err
 			}
 
-			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVip, ingressVip, dnsVip, checkInterval)
+			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVip, ingressVip, checkInterval)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
 	rootCmd.Flags().Duration("check-interval", time.Second*30, "Time between coredns watch checks")
 	rootCmd.Flags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
 	rootCmd.PersistentFlags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")
-	rootCmd.PersistentFlags().IP("dns-vip", nil, "Virtual IP Address to reach an OpenShift node resolving DNS server")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
 	}

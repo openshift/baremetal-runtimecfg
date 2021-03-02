@@ -47,10 +47,6 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		ingressVip = nil
 	}
-	dnsVip, err := cmd.Flags().GetIP("dns-vip")
-	if err != nil {
-		dnsVip = nil
-	}
 	apiPort, err := cmd.Flags().GetUint16("api-port")
 	if err != nil {
 		return err
@@ -71,7 +67,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, dnsVip, apiPort, lbPort, statPort)
+	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, apiPort, lbPort, statPort)
 	if err != nil {
 		return err
 	}
