@@ -211,7 +211,7 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
-func handleLeasing(cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
+func handleLeasing(cfgPath string, apiVip, ingressVip net.IP) error {
 	vips, err := getVipsToLease(cfgPath)
 
 	if err != nil {
@@ -230,7 +230,7 @@ func handleLeasing(cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
 		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
 	}
 
-	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip, dnsVip)
+	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip)
 	if err != nil {
 		return err
 	}
@@ -251,11 +251,11 @@ func handleLeasing(cfgPath string, apiVip, ingressVip, dnsVip net.IP) error {
 	return nil
 }
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip, dnsVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
-	if err := handleLeasing(cfgPath, apiVip, ingressVip, dnsVip); err != nil {
+	if err := handleLeasing(cfgPath, apiVip, ingressVip); err != nil {
 		return err
 	}
 
@@ -313,7 +313,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -360,7 +360,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			appliedConfig = curConfig
 
 		default:
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, dnsVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, 0, 0, 0)
 			if err != nil {
 				return err
 			}

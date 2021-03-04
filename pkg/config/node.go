@@ -33,8 +33,6 @@ type Cluster struct {
 	APIVirtualRouterID     uint8
 	APIVIPRecordType       string
 	APIVIPEmptyType        string
-	DNSVIP                 string
-	DNSVirtualRouterID     uint8
 	IngressVIP             string
 	IngressVirtualRouterID uint8
 	IngressVIPRecordType   string
@@ -168,27 +166,20 @@ func (c *Cluster) PopulateVRIDs() error {
 		return fmt.Errorf("Cluster name can't be empty")
 	}
 	c.APIVirtualRouterID = utils.FletcherChecksum8(c.Name+"-api") + 1
-	c.DNSVirtualRouterID = utils.FletcherChecksum8(c.Name+"-dns") + 1
-	if c.DNSVirtualRouterID == c.APIVirtualRouterID {
-		c.DNSVirtualRouterID++
-	}
 	c.IngressVirtualRouterID = utils.FletcherChecksum8(c.Name+"-ingress") + 1
-	for c.IngressVirtualRouterID == c.DNSVirtualRouterID || c.IngressVirtualRouterID == c.APIVirtualRouterID {
+	if c.IngressVirtualRouterID == c.APIVirtualRouterID {
 		c.IngressVirtualRouterID++
 	}
 	return nil
 }
 
-func GetVRRPConfig(apiVip, ingressVip, dnsVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
+func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	vips := make([]net.IP, 0)
 	if apiVip != nil {
 		vips = append(vips, apiVip)
 	}
 	if ingressVip != nil {
 		vips = append(vips, ingressVip)
-	}
-	if dnsVip != nil {
-		vips = append(vips, dnsVip)
 	}
 	return getInterfaceAndNonVIPAddr(vips)
 }
@@ -248,7 +239,7 @@ func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err e
 	return ingressConfig, nil
 }
 
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, dnsVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
 		return node, err
@@ -296,10 +287,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 			node.Cluster.IngressVIPEmptyType = "A"
 		}
 	}
-	if dnsVip != nil {
-		node.Cluster.DNSVIP = dnsVip.String()
-	}
-	vipIface, nonVipAddr, err := GetVRRPConfig(apiVip, ingressVip, dnsVip)
+	vipIface, nonVipAddr, err := GetVRRPConfig(apiVip, ingressVip)
 	if err != nil {
 		return node, err
 	}
@@ -317,7 +305,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 	// Filter out our potential CoreDNS addresses from upstream servers
 	node.DNSUpstreams = make([]string, 0)
 	for _, upstream := range resolvConfUpstreams {
-		if upstream != node.NonVirtualIP && upstream != node.Cluster.DNSVIP && upstream != "127.0.0.1" && upstream != "::1" {
+		if upstream != node.NonVirtualIP && upstream != "127.0.0.1" && upstream != "::1" {
 			node.DNSUpstreams = append(node.DNSUpstreams, upstream)
 		}
 	}

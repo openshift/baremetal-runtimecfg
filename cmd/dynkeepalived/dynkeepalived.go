@@ -28,10 +28,6 @@ func main() {
 			if err != nil {
 				ingressVip = nil
 			}
-			dnsVip, err := cmd.Flags().GetIP("dns-vip")
-			if err != nil {
-				dnsVip = nil
-			}
 			apiPort, err := cmd.Flags().GetUint16("api-port")
 			if err != nil {
 				return err
@@ -50,7 +46,7 @@ func main() {
 				return err
 			}
 
-			return monitor.KeepalivedWatch(args[0], clusterConfigPath, args[1], args[2], apiVip, ingressVip, dnsVip, apiPort, lbPort, checkInterval)
+			return monitor.KeepalivedWatch(args[0], clusterConfigPath, args[1], args[2], apiVip, ingressVip, apiPort, lbPort, checkInterval)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
