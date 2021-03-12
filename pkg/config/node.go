@@ -26,6 +26,12 @@ const localhostKubeApiServerUrl string = "https://localhost:6443"
 
 var log = logrus.New()
 
+type NodeAddress struct {
+	Address string
+	Name    string
+	Ipv6    bool
+}
+
 type Cluster struct {
 	Name                   string
 	Domain                 string
@@ -39,6 +45,7 @@ type Cluster struct {
 	IngressVIPEmptyType    string
 	VIPNetmask             int
 	MasterAmount           int64
+	NodeAddresses          []NodeAddress
 }
 
 type Backend struct {
@@ -429,4 +436,52 @@ func GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath string) (clusterN
 	}
 
 	return
+}
+
+func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
+	// Get node list
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		log.Errorf("Failed to build client config: %s", err)
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Errorf("Failed to create client: %s", err)
+		return
+	}
+	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err != nil {
+		log.Errorf("Failed to get node list: %s", err)
+		return
+	}
+	for _, n := range nodes.Items {
+		name := ""
+		addr := net.IP{}
+		// Can't compare IP objects, need a separate flag
+		foundAddr := false
+		for _, a := range n.Status.Addresses {
+			if a.Type == v1.NodeHostName {
+				// We only want the shortname
+				name = strings.Split(a.Address, ".")[0]
+			} else if a.Type == v1.NodeInternalIP {
+				addr = net.ParseIP(a.Address)
+				foundAddr = true
+			}
+		}
+		if name == "" || !foundAddr {
+			log.Warningf("Could not handle node: %v", node)
+			continue
+		}
+		// TODO(bnemec): The ipv6 flag isn't currently used in the templates,
+		// but at some point it probably should be so we provide RFC-compliant
+		// ipv6 behavior.
+		ipv6 := true
+		check := addr.To4()
+		if check != nil {
+			ipv6 = false
+		}
+		node.Cluster.NodeAddresses = append(node.Cluster.NodeAddresses, NodeAddress{Address: addr.String(), Name: name, Ipv6: ipv6})
+	}
 }
