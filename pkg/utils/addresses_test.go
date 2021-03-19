@@ -136,6 +136,34 @@ func addMultipleDefaultRoutesReversePriority(routes map[int][]netlink.Route, rf 
 	maybeAddRoute(routes, rf, eth1, "", false, 100)
 }
 
+func addDummyAddrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
+	// when addrMap only contains eth0 and eth1, golang seems to reliably return them
+	// in that order when iterating the map, such that the "multiple default routes
+	// with same priority" test always gets the right answer just by accident. Adding
+	// more elements to the map causes the iteration order to become unpredictable, so
+	// we test that the code does the right thing even if it sees the interfaces in
+	// the "wrong" order.
+	for i := 10; i < 100; i++ {
+		maybeAddAddress(
+			addrs,
+			af,
+			&netlink.Device{
+				LinkAttrs: netlink.LinkAttrs{
+					Index: i,
+					Name:  fmt.Sprintf("eth%d", i),
+				},
+			},
+			fmt.Sprintf("1.2.3.%d/24", i),
+			false,
+		)
+	}
+}
+
+func addMultipleDefaultRoutesSamePriority(routes map[int][]netlink.Route, rf RouteFilter) {
+	maybeAddRoute(routes, rf, eth0, "", false, 100)
+	maybeAddRoute(routes, rf, eth1, "", false, 100)
+}
+
 func ipv4AddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
 	addrs := make(map[netlink.Link][]netlink.Addr)
 	addIPv4Addrs(addrs, af)
@@ -215,6 +243,19 @@ func multipleDefaultRouteMap(rf RouteFilter) (map[int][]netlink.Route, error) {
 func multipleDefaultRouteMapReversePriority(rf RouteFilter) (map[int][]netlink.Route, error) {
 	routes := make(map[int][]netlink.Route)
 	addMultipleDefaultRoutesReversePriority(routes, rf)
+	return routes, nil
+}
+
+func ipv4DummyAddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
+	addrs := make(map[netlink.Link][]netlink.Addr)
+	addIPv4Addrs(addrs, af)
+	addDummyAddrs(addrs, af)
+	return addrs, nil
+}
+
+func multipleDefaultRouteMapSamePriority(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	addMultipleDefaultRoutesSamePriority(routes, rf)
 	return routes, nil
 }
 
@@ -298,6 +339,7 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route in an IPv4 cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMap,
@@ -308,6 +350,7 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route when that's not the first interface", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMapDefaultEth1,
@@ -318,6 +361,7 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route in an IPv6 cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv6AddrMap,
 			ipv6RouteMap,
@@ -328,12 +372,24 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route in a dual-stack cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			dualStackAddrMap,
 			dualStackRouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}))
+	})
+
+	It("prefers an IPv6 address in a dual-stack cluster when using --prefer-ipv6", func() {
+		addrs, err := addressesDefaultInternal(
+			true,
+			ValidNodeAddress,
+			dualStackAddrMap,
+			dualStackRouteMap,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::5"), net.ParseIP("10.0.0.5")}))
 	})
 
 	It("overlapping IPV6 subnets: matches an IPv6 VIP on the primary interface", func() {
@@ -382,6 +438,7 @@ var _ = Describe("addresses", func() {
 
 	It("overlapping IPV6 subnets: finds an interface with a default route in an IPv6 cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			overlappingIpv6AddrMap,
 			overlappingIpv6RouteMap,
@@ -392,6 +449,7 @@ var _ = Describe("addresses", func() {
 
 	It("overlapping IPV6 subnets: finds an interface with a default route in a dual-stack cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			overlappingDualStackAddrMap,
 			overlappingDualStackRouteMap,
@@ -402,6 +460,7 @@ var _ = Describe("addresses", func() {
 
 	It("handles multiple default routes consistently", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			multipleDefaultRouteMap,
@@ -412,12 +471,24 @@ var _ = Describe("addresses", func() {
 
 	It("handles multiple default routes consistently opposite priority", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			multipleDefaultRouteMapReversePriority,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("192.168.1.2")}))
+	})
+
+	It("handles multiple default routes with same priority consistently", func() {
+		addrs, err := addressesDefaultInternal(
+			false,
+			ValidNodeAddress,
+			ipv4DummyAddrMap,
+			multipleDefaultRouteMapSamePriority,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
 	})
 })
 
