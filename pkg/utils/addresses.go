@@ -193,9 +193,10 @@ func AddressesDefault(af AddressFilter) ([]net.IP, error) {
 	return addressesDefaultInternal(af, getAddrs, getRouteMap)
 }
 
-type AddressPriority struct {
-	Address  net.IP
-	Priority int
+type FoundAddress struct {
+	Address   net.IP
+	Priority  int
+	LinkIndex int
 }
 
 func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
@@ -209,31 +210,41 @@ func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRout
 	}
 
 	matches := make([]net.IP, 0)
-	priorities := make([]AddressPriority, 0)
+	addrs := make([]FoundAddress, 0)
 	for link, addresses := range addrMap {
-		if routeMap[link.Attrs().Index] == nil {
+		linkIndex := link.Attrs().Index
+		if routeMap[linkIndex] == nil {
 			continue
 		}
 		for _, address := range addresses {
 			log.Debugf("Address %s is on interface %s with default route", address, link.Attrs().Name)
 			// We should only have one default route per interface
-			priorities = append(priorities, AddressPriority{address.IP, routeMap[link.Attrs().Index][0].Priority})
+			addrs = append(addrs, FoundAddress{
+				Address:   address.IP,
+				Priority:  routeMap[linkIndex][0].Priority,
+				LinkIndex: linkIndex,
+			})
 		}
 	}
-	// Ensure that we always return addresses sorted by the priority of their
-	// associated default route. Otherwise the order of the addresses we return
-	// may change if an address moves to a bridge (for example).
-	sort.SliceStable(priorities, func(i, j int) bool {
-		return priorities[i].Priority < priorities[j].Priority
+
+	// Sort addresses into a stable order, based on default route priority and link
+	// index. Otherwise the order of the addresses we return may change if an address
+	// moves to a bridge (for example).
+	sort.SliceStable(addrs, func(i, j int) bool {
+		if addrs[i].Priority == addrs[j].Priority {
+			return addrs[i].LinkIndex < addrs[j].LinkIndex
+		}
+		return addrs[i].Priority < addrs[j].Priority
 	})
+
 	foundv4 := false
 	foundv6 := false
-	for _, ap := range priorities {
-		if (isIPv6(ap.Address) && foundv6) || (!isIPv6(ap.Address) && foundv4) {
+	for _, addr := range addrs {
+		if (isIPv6(addr.Address) && foundv6) || (!isIPv6(addr.Address) && foundv4) {
 			continue
 		}
-		matches = append(matches, ap.Address)
-		if isIPv6(ap.Address) {
+		matches = append(matches, addr.Address)
+		if isIPv6(addr.Address) {
 			foundv6 = true
 		} else {
 			foundv4 = true
