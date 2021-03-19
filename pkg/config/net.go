@@ -51,7 +51,7 @@ func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 		}
 	}
 
-	nodeAddrs, err := utils.AddressesDefault(utils.ValidNodeAddress)
+	nodeAddrs, err := utils.AddressesDefault(false, utils.ValidNodeAddress)
 	if err != nil {
 		return vipIface, nonVipAddr, err
 	}

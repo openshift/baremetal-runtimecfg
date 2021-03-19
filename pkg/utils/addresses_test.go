@@ -339,6 +339,7 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route in an IPv4 cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMap,
@@ -349,6 +350,7 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route when that's not the first interface", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMapDefaultEth1,
@@ -359,6 +361,7 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route in an IPv6 cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv6AddrMap,
 			ipv6RouteMap,
@@ -369,12 +372,24 @@ var _ = Describe("addresses", func() {
 
 	It("finds an interface with a default route in a dual-stack cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			dualStackAddrMap,
 			dualStackRouteMap,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}))
+	})
+
+	It("prefers an IPv6 address in a dual-stack cluster when using --prefer-ipv6", func() {
+		addrs, err := addressesDefaultInternal(
+			true,
+			ValidNodeAddress,
+			dualStackAddrMap,
+			dualStackRouteMap,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::5"), net.ParseIP("10.0.0.5")}))
 	})
 
 	It("overlapping IPV6 subnets: matches an IPv6 VIP on the primary interface", func() {
@@ -423,6 +438,7 @@ var _ = Describe("addresses", func() {
 
 	It("overlapping IPV6 subnets: finds an interface with a default route in an IPv6 cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			overlappingIpv6AddrMap,
 			overlappingIpv6RouteMap,
@@ -433,6 +449,7 @@ var _ = Describe("addresses", func() {
 
 	It("overlapping IPV6 subnets: finds an interface with a default route in a dual-stack cluster", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			overlappingDualStackAddrMap,
 			overlappingDualStackRouteMap,
@@ -443,6 +460,7 @@ var _ = Describe("addresses", func() {
 
 	It("handles multiple default routes consistently", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			multipleDefaultRouteMap,
@@ -453,6 +471,7 @@ var _ = Describe("addresses", func() {
 
 	It("handles multiple default routes consistently opposite priority", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4AddrMap,
 			multipleDefaultRouteMapReversePriority,
@@ -463,6 +482,7 @@ var _ = Describe("addresses", func() {
 
 	It("handles multiple default routes with same priority consistently", func() {
 		addrs, err := addressesDefaultInternal(
+			false,
 			ValidNodeAddress,
 			ipv4DummyAddrMap,
 			multipleDefaultRouteMapSamePriority,

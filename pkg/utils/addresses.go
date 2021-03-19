@@ -189,8 +189,8 @@ func defaultRoute(route netlink.Route) bool {
 }
 
 // AddressesDefault returns a slice of configured addresses in the current network namespace associated with default routes; IPv4 first (if any), then IPv6 (if any). You can optionally pass an AddressFilter to further filter down which addresses are considered
-func AddressesDefault(af AddressFilter) ([]net.IP, error) {
-	return addressesDefaultInternal(af, getAddrs, getRouteMap)
+func AddressesDefault(preferIPv6 bool, af AddressFilter) ([]net.IP, error) {
+	return addressesDefaultInternal(preferIPv6, af, getAddrs, getRouteMap)
 }
 
 type FoundAddress struct {
@@ -199,7 +199,7 @@ type FoundAddress struct {
 	LinkIndex int
 }
 
-func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
+func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
@@ -232,6 +232,9 @@ func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRout
 	// moves to a bridge (for example).
 	sort.SliceStable(addrs, func(i, j int) bool {
 		if addrs[i].Priority == addrs[j].Priority {
+			if addrs[i].LinkIndex == addrs[j].LinkIndex {
+				return isIPv6(addrs[i].Address) == preferIPv6 && isIPv6(addrs[j].Address) != preferIPv6
+			}
 			return addrs[i].LinkIndex < addrs[j].LinkIndex
 		}
 		return addrs[i].Priority < addrs[j].Priority
