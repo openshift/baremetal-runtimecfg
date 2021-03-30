@@ -67,15 +67,14 @@ type IngressConfig struct {
 }
 
 type Node struct {
-	Cluster           Cluster
-	LBConfig          ApiLBConfig
-	NonVirtualIP      string
-	ShortHostname     string
-	EtcdShortHostname string
-	VRRPInterface     string
-	DNSUpstreams      []string
-	IngressConfig     IngressConfig
-	EnableUnicast     bool
+	Cluster       Cluster
+	LBConfig      ApiLBConfig
+	NonVirtualIP  string
+	ShortHostname string
+	VRRPInterface string
+	DNSUpstreams  []string
+	IngressConfig IngressConfig
+	EnableUnicast bool
 }
 
 func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
@@ -272,10 +271,6 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip 
 		return node, err
 	}
 
-	node.EtcdShortHostname, err = utils.EtcdShortHostname()
-	if err != nil {
-		return node, err
-	}
 	node.Cluster.APIVIPRecordType = "A"
 	node.Cluster.APIVIPEmptyType = "AAAA"
 	if apiVip != nil {
