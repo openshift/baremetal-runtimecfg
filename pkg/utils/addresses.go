@@ -2,6 +2,7 @@ package utils
 
 import (
 	"net"
+	"sort"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -188,11 +189,17 @@ func defaultRoute(route netlink.Route) bool {
 }
 
 // AddressesDefault returns a slice of configured addresses in the current network namespace associated with default routes; IPv4 first (if any), then IPv6 (if any). You can optionally pass an AddressFilter to further filter down which addresses are considered
-func AddressesDefault(af AddressFilter) ([]net.IP, error) {
-	return addressesDefaultInternal(af, getAddrs, getRouteMap)
+func AddressesDefault(preferIPv6 bool, af AddressFilter) ([]net.IP, error) {
+	return addressesDefaultInternal(preferIPv6, af, getAddrs, getRouteMap)
 }
 
-func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
+type FoundAddress struct {
+	Address   net.IP
+	Priority  int
+	LinkIndex int
+}
+
+func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
@@ -203,17 +210,47 @@ func addressesDefaultInternal(af AddressFilter, getAddrs addressMapFunc, getRout
 	}
 
 	matches := make([]net.IP, 0)
+	addrs := make([]FoundAddress, 0)
 	for link, addresses := range addrMap {
-		if routeMap[link.Attrs().Index] == nil {
+		linkIndex := link.Attrs().Index
+		if routeMap[linkIndex] == nil {
 			continue
 		}
 		for _, address := range addresses {
-			if len(matches) > 0 && (isIPv6(address.IP) == isIPv6(matches[0])) {
-				continue
-			}
-
 			log.Debugf("Address %s is on interface %s with default route", address, link.Attrs().Name)
-			matches = append(matches, address.IP)
+			// We should only have one default route per interface
+			addrs = append(addrs, FoundAddress{
+				Address:   address.IP,
+				Priority:  routeMap[linkIndex][0].Priority,
+				LinkIndex: linkIndex,
+			})
+		}
+	}
+
+	// Sort addresses into a stable order, based on default route priority and link
+	// index. Otherwise the order of the addresses we return may change if an address
+	// moves to a bridge (for example).
+	sort.SliceStable(addrs, func(i, j int) bool {
+		if addrs[i].Priority == addrs[j].Priority {
+			if addrs[i].LinkIndex == addrs[j].LinkIndex {
+				return isIPv6(addrs[i].Address) == preferIPv6 && isIPv6(addrs[j].Address) != preferIPv6
+			}
+			return addrs[i].LinkIndex < addrs[j].LinkIndex
+		}
+		return addrs[i].Priority < addrs[j].Priority
+	})
+
+	foundv4 := false
+	foundv6 := false
+	for _, addr := range addrs {
+		if (isIPv6(addr.Address) && foundv6) || (!isIPv6(addr.Address) && foundv4) {
+			continue
+		}
+		matches = append(matches, addr.Address)
+		if isIPv6(addr.Address) {
+			foundv6 = true
+		} else {
+			foundv4 = true
 		}
 	}
 	return matches, nil
