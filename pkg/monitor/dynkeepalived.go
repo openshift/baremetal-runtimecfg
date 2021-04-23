@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -144,10 +145,15 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 
 	for {
 		if _, err := config.GetIngressConfig(kubeconfigPath); err != nil {
-			consecutiveErr++
-			log.WithFields(logrus.Fields{
-				"consecutiveErr": consecutiveErr,
-			}).Info("handleBootstrapStopKeepalived: detect failure on API")
+			// We have started to talk to Ironic through the API VIP as well,
+			// so if Ironic is still up then we need to keep the VIP, even if
+			// the apiserver has gone down.
+			if _, err = http.Get("http://localhost:6385/v1"); err != nil {
+				consecutiveErr++
+				log.WithFields(logrus.Fields{
+					"consecutiveErr": consecutiveErr,
+				}).Info("handleBootstrapStopKeepalived: detect failure on API and Ironic")
+			}
 		} else {
 			if consecutiveErr > bootstrapApiFailuresThreshold { // Means it was stopped
 				bootstrapStopKeepalived <- started
