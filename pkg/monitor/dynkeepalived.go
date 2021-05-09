@@ -38,6 +38,8 @@ const (
 	started APIState = iota
 )
 
+var BootstrapPeersListConfiguredOnce bool = false
+
 func getActualMode(cfgPath string) (error, bool) {
 	enableUnicast := false
 	_, err := os.Stat(cfgPath)
@@ -83,6 +85,14 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	if curConfig.EnableUnicast {
 		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) == 0 {
 			validConfig = false
+		}
+		if os.Getenv("IS_BOOTSTRAP") == "yes" {
+			if len(curConfig.LBConfig.Backends) > 0 {
+				BootstrapPeersListConfiguredOnce = true
+			}
+			if BootstrapPeersListConfiguredOnce && len(curConfig.LBConfig.Backends) == 0 {
+				validConfig = false
+			}
 		}
 	}
 	return cfgChanged && validConfig
