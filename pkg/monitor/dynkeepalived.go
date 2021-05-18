@@ -31,13 +31,6 @@ const (
 	bootstrapApiFailuresThreshold int           = 4
 )
 
-type APIState uint8
-
-const (
-	stopped APIState = iota
-	started APIState = iota
-)
-
 func getActualMode(cfgPath string) (error, bool) {
 	enableUnicast := false
 	_, err := os.Stat(cfgPath)
@@ -57,21 +50,24 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
-func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config.Node) {
+func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config.Node) error {
 	var err error
 
 	if !newConfig.EnableUnicast {
-		return
+		return nil
 	}
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
+		return err
 	}
 
 	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(newConfig.Cluster.APIVIP))
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
+		return err
 	}
+	return nil
 }
 
 func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
@@ -124,45 +120,6 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 		updateRequired = true
 	}
 	return updateRequired, desiredModeInfo
-}
-
-func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState) {
-	consecutiveErr := 0
-
-	/* It could take up to ~20 seconds for the local kube-apiserver to start running on the bootstrap node,
-	so before checking if kube-apiserver is not operational we should verify (with a timeout of 30 seconds)
-	first that it's operational. */
-	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
-	for start := time.Now(); time.Since(start) < time.Second*30; {
-		if _, err := config.GetIngressConfig(kubeconfigPath); err == nil {
-			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
-			break
-		}
-		log.Info("handleBootstrapStopKeepalived: local kube-apiserver still not operational")
-		time.Sleep(3 * time.Second)
-	}
-
-	for {
-		if _, err := config.GetIngressConfig(kubeconfigPath); err != nil {
-			consecutiveErr++
-			log.WithFields(logrus.Fields{
-				"consecutiveErr": consecutiveErr,
-			}).Info("handleBootstrapStopKeepalived: detect failure on API")
-		} else {
-			if consecutiveErr > bootstrapApiFailuresThreshold { // Means it was stopped
-				bootstrapStopKeepalived <- started
-			}
-			consecutiveErr = 0
-		}
-		if consecutiveErr > bootstrapApiFailuresThreshold {
-			log.WithFields(logrus.Fields{
-				"consecutiveErr":                consecutiveErr,
-				"bootstrapApiFailuresThreshold": bootstrapApiFailuresThreshold,
-			}).Info("handleBootstrapStopKeepalived: Num of failures exceeds threshold")
-			bootstrapStopKeepalived <- stopped
-		}
-		time.Sleep(1 * time.Second)
-	}
 }
 
 func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh chan modeUpdateInfo) {
@@ -254,6 +211,9 @@ func handleLeasing(cfgPath string, apiVip, ingressVip net.IP) error {
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
+	errorCounter := 0
+	errorThreshold := 3
+	keepalivedStopped := false
 
 	if err := handleLeasing(cfgPath, apiVip, ingressVip); err != nil {
 		return err
@@ -262,7 +222,6 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 	updateModeCh := make(chan modeUpdateInfo, 1)
-	bootstrapStopKeepalived := make(chan APIState, 1)
 
 	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGINT)
@@ -273,14 +232,6 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh)
 
-	if os.Getenv("IS_BOOTSTRAP") == "yes" {
-		/* When OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP is set to true the bootstrap node won't be destroyed and
-		   Keepalived on the bootstrap continue to run, this behavior might cause problems when unicast keepalived being used,
-		   so, Keepalived on bootstrap should stop running when local kube-apiserver isn't operational anymore.
-		   handleBootstrapStopKeepalived function is responsible to stop Keepalived when the condition is met. */
-		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived)
-	}
-
 	conn, err := net.Dial("unix", keepalivedControlSock)
 	if err != nil {
 		return err
@@ -290,26 +241,6 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		select {
 		case <-done:
 			return nil
-
-		case APIStateChanged := <-bootstrapStopKeepalived:
-			//Verify that stop message sent successfully
-			for {
-				var cmdMsg []byte
-				if APIStateChanged == stopped {
-					cmdMsg = []byte("stop\n")
-				} else {
-					cmdMsg = []byte("reload\n")
-				}
-				_, err := conn.Write(cmdMsg)
-				if err == nil {
-					log.Infof("Command message successfully sent to Keepalived container control socket: %s", string(cmdMsg[:]))
-					break
-				}
-				log.WithFields(logrus.Fields{
-					"socket": keepalivedControlSock,
-				}).Error("Failed to write command to Keepalived container control socket")
-				time.Sleep(1 * time.Second)
-			}
 
 		case desiredModeInfo := <-updateModeCh:
 
@@ -328,7 +259,12 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			} else {
 				newConfig.EnableUnicast = false
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			err = updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			if err != nil {
+				log.Errorf("Error updating unicast config in mode change: %s", err)
+				time.Sleep(interval)
+				continue
+			}
 
 			log.WithFields(logrus.Fields{
 				"curConfig": newConfig,
@@ -347,11 +283,8 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				"curTime": time.Now(),
 			}).Info("After sleep, before sending reload request ")
 
-			_, err = conn.Write([]byte("reload\n"))
+			err = keepalivedCommand(conn, "reload")
 			if err != nil {
-				log.WithFields(logrus.Fields{
-					"socket": keepalivedControlSock,
-				}).Error("Failed to write reload to Keepalived container control socket")
 				return err
 			}
 
@@ -374,7 +307,34 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
 				newConfig.EnableUnicast = curEnableUnicast
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			err = updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			if err != nil {
+				errorCounter++
+				if errorCounter > errorThreshold {
+					err = stopKeepalived(conn)
+					// stopKeepalived will already have logged any errors
+					if err != nil {
+						return err
+					}
+					if !keepalivedStopped {
+						log.Error("Stopped keepalived due to too many monitor failures")
+					}
+					keepalivedStopped = true
+				}
+				time.Sleep(interval)
+				continue
+			}
+			// Make sure keepalived is running
+			err = startKeepalived(conn)
+			if err != nil {
+				return err
+			}
+			if keepalivedStopped {
+				log.Info("Restarted keepalived after errors were resolved")
+			}
+			keepalivedStopped = false
+			errorCounter = 0
+
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
@@ -401,13 +361,11 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 						return err
 					}
 
-					_, err = conn.Write([]byte("reload\n"))
+					err = keepalivedCommand(conn, "reload")
 					if err != nil {
-						log.WithFields(logrus.Fields{
-							"socket": keepalivedControlSock,
-						}).Error("Failed to write reload to Keepalived container control socket")
 						return err
 					}
+
 					configChangeCtr = 0
 					appliedConfig = curConfig
 				}
@@ -442,4 +400,38 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			time.Sleep(interval)
 		}
 	}
+}
+
+// Send a command to the keepalived control socket
+func keepalivedCommand(conn net.Conn, command string) error {
+	_, err := conn.Write([]byte(command + "\n"))
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"socket": keepalivedControlSock,
+		}).Errorf("Failed to write %s to Keepalived container control socket", command)
+		return err
+	}
+	return nil
+}
+
+func stopKeepalived(conn net.Conn) error {
+	err := keepalivedCommand(conn, "stop")
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Error("Failed to stop keepalived")
+		return err
+	}
+	return nil
+}
+
+func startKeepalived(conn net.Conn) error {
+	err := keepalivedCommand(conn, "start")
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Error("Failed to start keepalived")
+		return err
+	}
+	return nil
 }
