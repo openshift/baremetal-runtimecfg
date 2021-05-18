@@ -1,10 +1,12 @@
 package render
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 	"text/template"
 
 	"github.com/sirupsen/logrus"
@@ -48,6 +50,21 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 			"path": renderPath,
 		}).Error("Failed to set permissions on file")
 		return err
+	}
+
+	buf := &bytes.Buffer{}
+	err = tmpl.Execute(buf, cfg)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"path": renderPath,
+		}).Error("Failed to render template")
+		return err
+	}
+	// The string we get back is a single line with \n's. For readability,
+	// split it and write it line-by-line.
+	lines := strings.Split(buf.String(), "\n")
+	for _, line := range lines {
+		log.Info(line)
 	}
 
 	log.WithFields(logrus.Fields{
