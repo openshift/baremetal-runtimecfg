@@ -81,7 +81,7 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	// we want to apply new config to master nodes only after nodes appears in etcd, with this
 	// approach we should avoid asymetric configuration
 	if curConfig.EnableUnicast {
-		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) == 0 {
+		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 2 {
 			validConfig = false
 		}
 	}
