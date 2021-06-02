@@ -329,7 +329,6 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				newConfig.EnableUnicast = false
 			}
 			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
-
 			log.WithFields(logrus.Fields{
 				"curConfig": newConfig,
 			}).Info("Mode Update config change")
@@ -375,6 +374,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				newConfig.EnableUnicast = curEnableUnicast
 			}
 			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			newConfig.IngressConfig.Priority = config.GetIngressPriority(kubeconfigPath, newConfig.NonVirtualIP)
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
