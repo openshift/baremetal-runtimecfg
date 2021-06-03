@@ -1,12 +1,10 @@
 reviewers:
   - celebdor
   - cybertron
-  - bcrochet
   - yboaron
 approvers:
   - celebdor
   - cybertron
-  - bcrochet
   - yboaron
 component: Networking
 subcomponent: runtime-cfg
