@@ -22,7 +22,10 @@ import (
 	"github.com/openshift/installer/pkg/types"
 )
 
-const localhostKubeApiServerUrl string = "https://localhost:6443"
+const (
+	localhostKubeApiServerUrl    = "https://localhost:6443"
+	defaultIngressControllerName = "router-internal-default"
+)
 
 var log = logrus.New()
 
@@ -63,7 +66,8 @@ type ApiLBConfig struct {
 }
 
 type IngressConfig struct {
-	Peers []string
+	Peers    []string
+	Priority int
 }
 
 type Node struct {
@@ -218,6 +222,33 @@ func IsUpgradeStillRunning(kubeconfigPath string) (error, bool) {
 	return nil, false
 }
 
+func GetIngressPriority(kubeconfigPath string, nonVirtualIP string) int {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		log.Errorf("Failed to retrieve config from kubeconfig: %s , set priority to lower value", err)
+		return 20
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Errorf("Failed to build client config: %s , set priority to lower value", err)
+		return 20
+	}
+	endpoint, err := clientset.CoreV1().Endpoints("openshift-ingress").Get(defaultIngressControllerName, metav1.GetOptions{})
+	if err != nil {
+		log.Errorf("Failed to read %s endpoints: %s , set priority to lower value", defaultIngressControllerName, err)
+		return 20
+	}
+	for _, entry := range endpoint.Subsets {
+		for _, address := range entry.Addresses {
+			if address.IP == nonVirtualIP {
+				return 40
+			}
+		}
+	}
+	return 20
+}
+
 func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -228,7 +259,6 @@ func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err e
 	if err != nil {
 		return ingressConfig, err
 	}
-
 	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
 	if err != nil {
 		return ingressConfig, err
