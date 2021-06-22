@@ -79,6 +79,7 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, 
 					log.WithFields(logrus.Fields{
 						"curConfig": *curConfig,
 					}).Info("Apply config change")
+					prevMD5, errPrevMD5 := utils.GetFileMd5(cfgPath)
 					err = render.RenderFile(cfgPath, templatePath, RuntimeConfig{LBConfig: curConfig})
 					if err != nil {
 						log.WithFields(logrus.Fields{
@@ -86,12 +87,19 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, 
 						}).Error("Failed to render HAProxy configuration")
 						return err
 					}
-					_, err = conn.Write([]byte("reload\n"))
-					if err != nil {
+					newMD5, err := utils.GetFileMd5(cfgPath)
+					if (newMD5 == prevMD5) && (errPrevMD5 == nil) && (err == nil) {
 						log.WithFields(logrus.Fields{
-							"socket": haproxyMasterSock,
-						}).Error("Failed to write reload to HAProxy master socket")
-						return err
+							"curConfig": *curConfig,
+						}).Info("Rendered cfg file equal to previous one, no need to reload")
+					} else {
+						_, err = conn.Write([]byte("reload\n"))
+						if err != nil {
+							log.WithFields(logrus.Fields{
+								"socket": haproxyMasterSock,
+							}).Error("Failed to write reload to HAProxy master socket")
+							return err
+						}
 					}
 					configChangeCtr = 0
 					appliedConfig = curConfig
