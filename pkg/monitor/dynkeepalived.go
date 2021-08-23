@@ -236,6 +236,19 @@ func handleLeasing(cfgPath string, apiVip, ingressVip net.IP) error {
 		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
 	}
 
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return err
+	}
+	for _, i := range interfaces {
+		if vips.APIVip.MacAddress == i.HardwareAddr.String() && vips.APIVip.Name != i.Name {
+			return fmt.Errorf("Duplicate MAC address for API VIP: %s", i.HardwareAddr)
+		}
+		if vips.IngressVip.MacAddress == i.HardwareAddr.String() && vips.IngressVip.Name != i.Name {
+			return fmt.Errorf("Duplicate MAC address for Ingress VIP: %s", i.HardwareAddr)
+		}
+	}
+
 	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip)
 	if err != nil {
 		return err

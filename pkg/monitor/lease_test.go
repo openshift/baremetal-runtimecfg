@@ -343,6 +343,44 @@ var _ = Describe("getVipsToLease", func() {
 		Expect(*vips).Should(Equal(data))
 	})
 
+	It("duplicate_api_mac", func() {
+		interfaces, err := net.Interfaces()
+		Expect(err).ShouldNot(HaveOccurred())
+		// Loopback has no MAC so skip it
+		duplicateMac := interfaces[1].HardwareAddr.String()
+		data := yamlVips{
+			APIVip:     &vip{"api", duplicateMac, generateIP()},
+			IngressVip: &vip{"ingress", generateMac().String(), generateIP()},
+		}
+
+		buffer, err := yaml.Marshal(&data)
+		Expect(err).ShouldNot(HaveOccurred())
+
+		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+
+		err = handleLeasing(cfgPath, net.ParseIP(data.APIVip.IpAddress), net.ParseIP(data.IngressVip.IpAddress))
+		Expect(err).Should(HaveOccurred())
+	})
+
+	It("duplicate_ingress_mac", func() {
+		interfaces, err := net.Interfaces()
+		Expect(err).ShouldNot(HaveOccurred())
+		// Loopback has no MAC so skip it
+		duplicateMac := interfaces[1].HardwareAddr.String()
+		data := yamlVips{
+			APIVip:     &vip{"api", generateMac().String(), generateIP()},
+			IngressVip: &vip{"ingress", duplicateMac, generateIP()},
+		}
+
+		buffer, err := yaml.Marshal(&data)
+		Expect(err).ShouldNot(HaveOccurred())
+
+		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+
+		err = handleLeasing(cfgPath, net.ParseIP(data.APIVip.IpAddress), net.ParseIP(data.IngressVip.IpAddress))
+		Expect(err).Should(HaveOccurred())
+	})
+
 	AfterEach(func() {
 		_ = os.RemoveAll(path)
 	})
