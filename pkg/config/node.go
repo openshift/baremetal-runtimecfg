@@ -218,7 +218,7 @@ func IsUpgradeStillRunning(kubeconfigPath string) (error, bool) {
 	return nil, false
 }
 
-func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err error) {
+func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig IngressConfig, err error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return ingressConfig, err
@@ -237,6 +237,12 @@ func GetIngressConfig(kubeconfigPath string) (ingressConfig IngressConfig, err e
 	for _, node := range nodes.Items {
 		for _, address := range node.Status.Addresses {
 			if address.Type == v1.NodeInternalIP {
+				if filterIpType != "" {
+					if (net.ParseIP(filterIpType).To4() != nil && net.ParseIP(address.Address).To4() == nil) ||
+						(net.ParseIP(filterIpType).To4() == nil && net.ParseIP(address.Address).To4() != nil) {
+						continue
+					}
+				}
 				ingressConfig.Peers = append(ingressConfig.Peers, address.Address)
 			}
 		}
