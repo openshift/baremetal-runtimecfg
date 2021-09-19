@@ -64,7 +64,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 	if !newConfig.EnableUnicast {
 		return
 	}
-	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath)
+	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, newConfig.Cluster.APIVIP)
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
 	}
@@ -135,7 +135,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	first that it's operational. */
 	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
 	for start := time.Now(); time.Since(start) < time.Second*30; {
-		if _, err := config.GetIngressConfig(kubeconfigPath); err == nil {
+		if _, err := config.GetIngressConfig(kubeconfigPath, ""); err == nil {
 			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
 			break
 		}
@@ -144,7 +144,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	}
 
 	for {
-		if _, err := config.GetIngressConfig(kubeconfigPath); err != nil {
+		if _, err := config.GetIngressConfig(kubeconfigPath, ""); err != nil {
 			// We have started to talk to Ironic through the API VIP as well,
 			// so if Ironic is still up then we need to keep the VIP, even if
 			// the apiserver has gone down.
