@@ -135,6 +135,16 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 	for link, addresses := range addrMap {
 	addrLoop:
 		for _, address := range addresses {
+			isVip := false
+			for _, vip := range vips {
+				if address.IP.String() == vip.String() {
+					log.Debugf("Address %s is VIP %s. Skipping.", address, vip)
+					isVip = true
+				}
+			}
+			if isVip {
+				continue
+			}
 			maskPrefix, maskBits := address.Mask.Size()
 			if net.IPv6len == len(address.IP) && maskPrefix == maskBits {
 				if routeMap == nil {
