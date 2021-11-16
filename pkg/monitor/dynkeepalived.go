@@ -316,6 +316,9 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				}).Error("Failed to write command to Keepalived container control socket")
 				time.Sleep(1 * time.Second)
 			}
+			// Make sure we don't send multiple messages in close succession if the
+			// bootstrapStopKeepalived queue has more than one item in it.
+			time.Sleep(5 * time.Second)
 
 		case desiredModeInfo := <-updateModeCh:
 
