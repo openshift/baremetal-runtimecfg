@@ -21,7 +21,7 @@ func main() {
 				cmd.Help()
 				return nil
 			}
-			clusterName, clusterDomain, err := config.GetKubeconfigClusterNameAndDomain(args[0])
+			clusterName, clusterDomain, err := config.GetClusterNameAndDomainFromAPIServer(args[0])
 			if err != nil {
 				return err
 			}

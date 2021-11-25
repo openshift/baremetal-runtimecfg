@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -108,22 +107,28 @@ func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
 	return upstreams, nil
 }
 
-func GetKubeconfigClusterNameAndDomain(kubeconfigPath string) (name, domain string, err error) {
-	kubeCfg, err := clientcmd.LoadFromFile(kubeconfigPath)
+func GetClusterNameAndDomainFromAPIServer(kubeconfigPath string) (string, string, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
-		return "", "", err
-	}
-	ctxt := kubeCfg.Contexts[kubeCfg.CurrentContext]
-	cluster := kubeCfg.Clusters[ctxt.Cluster]
-	serverUrl, err := url.Parse(cluster.Server)
-	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("could not build client config from kubeconfig file: %w", err)
 	}
 
-	apiHostname := serverUrl.Hostname()
-	apiHostnameSlices := strings.SplitN(apiHostname, ".", 3)
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return "", "", fmt.Errorf("could not create clientset from config: %w", err)
+	}
 
-	return apiHostnameSlices[1], apiHostnameSlices[2], nil
+	clusterConfig, err := clientset.CoreV1().ConfigMaps("kube-system").Get("cluster-config-v1", metav1.GetOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("could not get cluster-config-v1 config map: %w", err)
+	}
+
+	ic, err := getInstallConfigFromConfigMap(clusterConfig)
+	if err != nil {
+		return "", "", fmt.Errorf("could not get install-config from config map: %w", err)
+	}
+
+	return ic.ObjectMeta.Name, ic.BaseDomain, nil
 }
 
 func getClusterConfigClusterNameAndDomain(configPath string) (name, domain string, err error) {
@@ -150,16 +155,31 @@ func getClusterConfigMapInstallConfig(configPath string) (installConfig types.In
 		return installConfig, err
 	}
 
-	cm := v1.ConfigMap{}
-	err = yaml.Unmarshal(yamlFile, &cm)
+	cm := &v1.ConfigMap{}
+	err = yaml.Unmarshal(yamlFile, cm)
 	if err != nil {
 		return installConfig, err
 	}
 
-	ic := types.InstallConfig{}
-	err = yaml.Unmarshal([]byte(cm.Data["install-config"]), &ic)
+	ic, err := getInstallConfigFromConfigMap(cm)
+	if err != nil {
+		return installConfig, err
+	}
+	return *ic, nil
+}
 
-	return ic, err
+func getInstallConfigFromConfigMap(cm *v1.ConfigMap) (*types.InstallConfig, error) {
+	if _, ok := cm.Data["install-config"]; !ok {
+		return nil, fmt.Errorf("config map must contain install-config key")
+	}
+
+	ic := &types.InstallConfig{}
+	err := yaml.Unmarshal([]byte(cm.Data["install-config"]), ic)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal install-config from config map")
+	}
+
+	return ic, nil
 }
 
 // PopulateVRIDs fills in the Virtual Router information for the provided Node configuration
@@ -433,7 +453,7 @@ func GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath string) (clusterN
 	clusterName, clusterDomain, err = getClusterConfigClusterNameAndDomain(clusterConfigPath)
 	if err != nil {
 		// We are using kubeconfig as a fallback for this
-		clusterName, clusterDomain, err = GetKubeconfigClusterNameAndDomain(kubeconfigPath)
+		clusterName, clusterDomain, err = GetClusterNameAndDomainFromAPIServer(kubeconfigPath)
 	}
 
 	return
