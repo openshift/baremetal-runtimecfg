@@ -21,7 +21,7 @@ services:
       - dhcp
 
   dhcpd:
-    image: quay.io/cloudctl/dhcp:ubi
+    image: quay.io/cloudctl/dhcp:minimal
     cap_add:
       - NET_ADMIN
     volumes:
