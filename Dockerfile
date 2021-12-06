@@ -1,4 +1,4 @@
-FROM registry.ci.openshift.org/openshift/release:golang-1.13 AS builder
+FROM registry.ci.openshift.org/openshift/release:golang-1.17 AS builder
 WORKDIR /go/src/github.com/openshift/baremetal-runtimecfg
 COPY . .
 RUN mkdir build
