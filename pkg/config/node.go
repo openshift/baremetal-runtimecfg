@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -202,7 +203,7 @@ func IsUpgradeStillRunning(kubeconfigPath string) (error, bool) {
 		return err, true
 	}
 
-	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return err, true
 	}
@@ -229,7 +230,7 @@ func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig
 		return ingressConfig, err
 	}
 
-	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return ingressConfig, err
 	}
@@ -363,7 +364,7 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool) (backends [
 		}).Info("Failed to get client")
 		return []Backend{}, err
 	}
-	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
 		LabelSelector: "node-role.kubernetes.io/master=",
 	})
 	if err != nil {
@@ -452,7 +453,7 @@ func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
 		log.Errorf("Failed to create client: %s", err)
 		return
 	}
-	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		log.Errorf("Failed to get node list: %s", err)
 		return
