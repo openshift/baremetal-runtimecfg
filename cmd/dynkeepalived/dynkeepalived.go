@@ -13,8 +13,9 @@ var log = logrus.New()
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "dynkeepalived path_to_kubeconfig path_to_keepalived_cfg_template path_to_config",
-		Short: "Monitors runtime external interface for keepalived and reloads if it changes",
+		Use:          "dynkeepalived path_to_kubeconfig path_to_keepalived_cfg_template path_to_config",
+		Short:        "Monitors runtime external interface for keepalived and reloads if it changes",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 3 {
 				cmd.Help()
