@@ -23,7 +23,11 @@ import (
 	"github.com/openshift/installer/pkg/types"
 )
 
-const localhostKubeApiServerUrl string = "https://localhost:6443"
+const (
+	localhostKubeApiServerUrl string = "https://localhost:6443"
+	// labelNodeRolePrefix is a label prefix for node roles
+	labelNodeRolePrefix = "node-role.kubernetes.io/"
+)
 
 var log = logrus.New()
 
@@ -191,32 +195,101 @@ func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAdd
 	return getInterfaceAndNonVIPAddr(vips)
 }
 
-func IsUpgradeStillRunning(kubeconfigPath string) (error, bool) {
+// GetNodes will collect all nodes which contain the annotation node-role.kubernetes.io/${VAR} annotation
+// and return a map with the data.
+//
+// i.e:
+//	node-role.kubernetes.io/master
+//	node-role.kubernetes.io/worker
+//	node-role.kubernetes.io/infra
+//	etc.
+//
+// Args:
+//      - kubeconfigPath as string
+//
+// Returns:
+//      - map[string][]v1.Node or error
+//
+func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
+	nodeCluster := make(map[string][]v1.Node)
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
-		return err, true
+		return nil, err
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return err, true
+		return nil, err
 	}
 
 	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return err, true
+		return nil, err
 	}
 
 	for _, node := range nodes.Items {
-		if node.Annotations["machineconfiguration.openshift.io/desiredConfig"] != node.Annotations["machineconfiguration.openshift.io/currentConfig"] ||
-			node.Annotations["machineconfiguration.openshift.io/desiredConfig"] != nodes.Items[0].Annotations["machineconfiguration.openshift.io/desiredConfig"] {
-
-			return nil, true
+		// Get all labels for *each node* which contain node-role.kubernetes.io/
+		for label := range node.Labels {
+			switch {
+			case strings.HasPrefix(label, labelNodeRolePrefix):
+				if role := strings.TrimPrefix(label, labelNodeRolePrefix); len(role) > 0 {
+					nodeCluster[role] = append(nodeCluster[role], node)
+				}
+			}
 		}
 	}
+	return nodeCluster, nil
+}
 
-	return nil, false
+// IsTheSameConfig will compare the config annotations
+//
+// Args:
+//      - The node list based on v1.NodeList
+//
+// Returns:
+//      - true (same config) or false
+//
+func IsTheSameConfig(nodes []v1.Node) bool {
+	desiredConfig := "machineconfiguration.openshift.io/desiredConfig"
+	currentConfig := "machineconfiguration.openshift.io/currentConfig"
+
+	for _, node := range nodes {
+		if node.Annotations[desiredConfig] != node.Annotations[currentConfig] ||
+			node.Annotations[desiredConfig] != nodes[0].Annotations[desiredConfig] {
+			return false
+		}
+	}
+	return true
+}
+
+// IsUpgradeStillRunning check if the upgrade still running in the nodes
+// comparing the node's state.
+//
+// Args:
+//      - kubeconfigPath as string
+//
+// Returns:
+//      - true (same config), false or error
+//
+func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
+	nodes, err := GetNodes(kubeconfigPath)
+	if err != nil {
+		return false, err
+	}
+
+	// Go to all node types identified in GetNodes()
+	for nodeRole := range nodes {
+		nodesConfigs := IsTheSameConfig(nodes[nodeRole])
+		if err != nil {
+			return false, err
+		}
+
+		if nodesConfigs {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig IngressConfig, err error) {
