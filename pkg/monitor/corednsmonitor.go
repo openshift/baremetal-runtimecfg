@@ -16,7 +16,7 @@ import (
 
 const resolvConfFilepath string = "/var/run/NetworkManager/resolv.conf"
 
-func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip net.IP, interval time.Duration) error {
+func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, interval time.Duration) error {
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 
@@ -42,7 +42,7 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 			if err != nil {
 				return err
 			}
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVip, ingressVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0)
 			if err != nil {
 				return err
 			}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"io/ioutil"
+	"net"
 	"os"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
@@ -23,9 +24,11 @@ func init() {
 
 	renderCmd.Flags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
 	renderCmd.Flags().Bool("verbose", false, "Display extra information about the rendering")
-	renderCmd.Flags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
-	renderCmd.Flags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")
-	renderCmd.Flags().IP("dns-vip", nil, "Virtual IP Address to reach an OpenShift node resolving DNS server")
+	renderCmd.Flags().IP("api-vip", nil, "DEPRECATED: Virtual IP Address to reach the OpenShift API")
+	renderCmd.Flags().IPSlice("api-vips", nil, "Virtual IP Addresses to reach the OpenShift API")
+	renderCmd.Flags().IP("ingress-vip", nil, "DEPRECATED: Virtual IP Address to reach the OpenShift Ingress Routers")
+	renderCmd.Flags().IPSlice("ingress-vips", nil, "Virtual IP Addresses to reach the OpenShift Ingress Routers")
+	renderCmd.Flags().IP("dns-vip", nil, "DEPRECATED: Virtual IP Address to reach an OpenShift node resolving DNS server")
 	renderCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
 	renderCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen at")
 	renderCmd.Flags().Uint16("stat-port", 29445, "Port where the HAProxy stats API will listen at")
@@ -43,9 +46,23 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		apiVip = nil
 	}
+	apiVips, err := cmd.Flags().GetIPSlice("api-vips")
+	if err != nil {
+		apiVips = []net.IP{}
+	}
+	if len(apiVips) < 1 && apiVip != nil {
+		apiVips = []net.IP{apiVip}
+	}
 	ingressVip, err := cmd.Flags().GetIP("ingress-vip")
 	if err != nil {
 		ingressVip = nil
+	}
+	ingressVips, err := cmd.Flags().GetIPSlice("ingress-vips")
+	if err != nil {
+		ingressVips = []net.IP{}
+	}
+	if len(ingressVips) < 1 && ingressVip != nil {
+		ingressVips = []net.IP{ingressVip}
 	}
 	apiPort, err := cmd.Flags().GetUint16("api-port")
 	if err != nil {
@@ -67,7 +84,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVip, ingressVip, apiPort, lbPort, statPort)
+	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort)
 	if err != nil {
 		return err
 	}

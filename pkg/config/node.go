@@ -80,6 +80,7 @@ type Node struct {
 	DNSUpstreams  []string
 	IngressConfig IngressConfig
 	EnableUnicast bool
+	Configs       *[]Node
 }
 
 func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
@@ -325,7 +326,37 @@ func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig
 	return ingressConfig, nil
 }
 
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+	vipCount := 0
+	if len(apiVips) > len(ingressVips) {
+		vipCount = len(apiVips)
+	} else {
+		vipCount = len(ingressVips)
+	}
+	nodes := []Node{}
+	var apiVip, ingressVip net.IP
+	for i := 0; i < vipCount; i++ {
+		if i < len(apiVips) {
+			apiVip = apiVips[i]
+		} else {
+			apiVip = nil
+		}
+		if i < len(ingressVips) {
+			ingressVip = ingressVips[i]
+		} else {
+			ingressVip = nil
+		}
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort)
+		if err != nil {
+			return Node{}, err
+		}
+		nodes = append(nodes, newNode)
+	}
+	nodes[0].Configs = &nodes
+	return nodes[0], nil
+}
+
+func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
 		return node, err

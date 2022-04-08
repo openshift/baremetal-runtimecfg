@@ -1,7 +1,7 @@
 package monitor
 
 import (
-	"fmt"
+	//"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -217,51 +217,51 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
-func handleLeasing(cfgPath string, apiVip, ingressVip net.IP) error {
-	vips, err := getVipsToLease(cfgPath)
-
-	if err != nil {
-		return err
-	}
-
-	if vips == nil {
-		return nil
-	}
-
-	if vips.APIVip.IpAddress != apiVip.String() {
-		return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVip.String(), vips.APIVip.IpAddress)
-	}
-
-	if vips.IngressVip.IpAddress != ingressVip.String() {
-		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
-	}
-
-	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip)
-	if err != nil {
-		return err
-	}
-
-	if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{*vips.APIVip, *vips.IngressVip}); err != nil {
-		log.WithFields(logrus.Fields{
-			"cfgPath":        cfgPath,
-			"vipMasterIface": vipIface.Name,
-			"vips":           []vip{*vips.APIVip, *vips.IngressVip},
-		}).WithError(err).Error("Failed to lease VIPS")
-		return err
-	}
-
-	log.WithFields(logrus.Fields{
-		"cfgPath": cfgPath,
-	}).Info("Leased VIPS successfully")
+func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
+// 	vips, err := getVipsToLease(cfgPath)
+//
+// 	if err != nil {
+// 		return err
+// 	}
+//
+// 	if vips == nil {
+// 		return nil
+// 	}
+//
+// 	if vips.APIVip.IpAddress != apiVip.String() {
+// 		return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVip.String(), vips.APIVip.IpAddress)
+// 	}
+//
+// 	if vips.IngressVip.IpAddress != ingressVip.String() {
+// 		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
+// 	}
+//
+// 	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip)
+// 	if err != nil {
+// 		return err
+// 	}
+//
+// 	if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{*vips.APIVip, *vips.IngressVip}); err != nil {
+// 		log.WithFields(logrus.Fields{
+// 			"cfgPath":        cfgPath,
+// 			"vipMasterIface": vipIface.Name,
+// 			"vips":           []vip{*vips.APIVip, *vips.IngressVip},
+// 		}).WithError(err).Error("Failed to lease VIPS")
+// 		return err
+// 	}
+//
+// 	log.WithFields(logrus.Fields{
+// 		"cfgPath": cfgPath,
+// 	}).Info("Leased VIPS successfully")
 
 	return nil
 }
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVip, ingressVip net.IP, apiPort, lbPort uint16, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
-	if err := handleLeasing(cfgPath, apiVip, ingressVip); err != nil {
+	if err := handleLeasing(cfgPath, apiVips, ingressVips); err != nil {
 		return err
 	}
 
@@ -322,7 +322,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -369,7 +369,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			appliedConfig = curConfig
 
 		default:
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVip, ingressVip, 0, 0, 0)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -426,7 +426,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			prevConfig = &newConfig
 
 			// Signal to keepalived whether the haproxy firewall rule is in place
-			ruleExists, err := checkHAProxyFirewallRules(apiVip.String(), apiPort, lbPort)
+			ruleExists, err := checkHAProxyFirewallRules(apiVips[0].String(), apiPort, lbPort)
 			if err != nil {
 				log.Error("Failed to check for haproxy firewall rule")
 			} else {
