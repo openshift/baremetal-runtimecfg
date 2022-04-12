@@ -1,7 +1,7 @@
 package monitor
 
 import (
-	//"fmt"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -58,7 +58,7 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
-func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config.Node) {
+func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) {
 	var err error
 
 	if !newConfig.EnableUnicast {
@@ -72,6 +72,17 @@ func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config
 	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(newConfig.Cluster.APIVIP))
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
+	}
+
+	for _, c := range *newConfig.Configs {
+		c.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, c.Cluster.APIVIP)
+		if err != nil {
+			log.Warnf("Could not retrieve ingress config: %v", err)
+		}
+		c.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(c.Cluster.APIVIP))
+		if err != nil {
+			log.Warnf("Could not retrieve LB config: %v", err)
+		}
 	}
 }
 
@@ -218,41 +229,54 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 }
 
 func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
-// 	vips, err := getVipsToLease(cfgPath)
-//
-// 	if err != nil {
-// 		return err
-// 	}
-//
-// 	if vips == nil {
-// 		return nil
-// 	}
-//
-// 	if vips.APIVip.IpAddress != apiVip.String() {
-// 		return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVip.String(), vips.APIVip.IpAddress)
-// 	}
-//
-// 	if vips.IngressVip.IpAddress != ingressVip.String() {
-// 		return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVip.String(), vips.IngressVip.IpAddress)
-// 	}
-//
-// 	vipIface, _, err := config.GetVRRPConfig(apiVip, ingressVip)
-// 	if err != nil {
-// 		return err
-// 	}
-//
-// 	if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{*vips.APIVip, *vips.IngressVip}); err != nil {
-// 		log.WithFields(logrus.Fields{
-// 			"cfgPath":        cfgPath,
-// 			"vipMasterIface": vipIface.Name,
-// 			"vips":           []vip{*vips.APIVip, *vips.IngressVip},
-// 		}).WithError(err).Error("Failed to lease VIPS")
-// 		return err
-// 	}
-//
-// 	log.WithFields(logrus.Fields{
-// 		"cfgPath": cfgPath,
-// 	}).Info("Leased VIPS successfully")
+	vips, err := getVipsToLease(cfgPath)
+
+	if err != nil {
+		return err
+	}
+
+	if vips == nil {
+		return nil
+	}
+
+	if len(apiVips) != len(vips.APIVips) {
+		return fmt.Errorf("Mismatched number of API VIPs. Expected: %d Actual: %d", len(apiVips), len(vips.APIVips))
+	}
+	if len(ingressVips) != len(vips.IngressVips) {
+		return fmt.Errorf("Mismatched number of Ingress VIPs. Expected: %d Actual: %d", len(ingressVips), len(vips.IngressVips))
+	}
+
+	for i, vip := range vips.APIVips {
+		if vip.IpAddress != apiVips[i].String() {
+			return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVips[i].String(), vips.APIVip.IpAddress)
+		}
+	}
+
+	for i, vip := range vips.IngressVips {
+		if vip.IpAddress != ingressVips[i].String() {
+			return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVips[i].String(), vips.IngressVip.IpAddress)
+		}
+	}
+
+	for i := 0; i < len(apiVips); i++ {
+		vipIface, _, err := config.GetVRRPConfig(apiVips[i], ingressVips[i])
+		if err != nil {
+			return err
+		}
+
+		if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{vips.APIVips[i], vips.IngressVips[i]}); err != nil {
+			log.WithFields(logrus.Fields{
+				"cfgPath":        cfgPath,
+				"vipMasterIface": vipIface.Name,
+				"vips":           []vip{vips.APIVips[i], vips.IngressVips[i]},
+			}).WithError(err).Error("Failed to lease VIPS")
+			return err
+		}
+	}
+
+	log.WithFields(logrus.Fields{
+		"cfgPath": cfgPath,
+	}).Info("Leased VIPS successfully")
 
 	return nil
 }
@@ -337,7 +361,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			} else {
 				newConfig.EnableUnicast = false
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			updateUnicastConfig(kubeconfigPath, &newConfig)
 
 			log.WithFields(logrus.Fields{
 				"curConfig": newConfig,
@@ -383,7 +407,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
 				newConfig.EnableUnicast = curEnableUnicast
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			updateUnicastConfig(kubeconfigPath, &newConfig)
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
