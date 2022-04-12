@@ -1,10 +1,10 @@
 reviewers:
-  - celebdor
+  - creydr
   - cybertron
-  - yboaron
+  - dougsland
 approvers:
-  - celebdor
+  - creydr
   - cybertron
-  - yboaron
+  - dougsland
 component: Networking
 subcomponent: runtime-cfg
