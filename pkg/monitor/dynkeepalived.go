@@ -194,7 +194,7 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 			}).Info("Update Mode request detected, verify that upgrade process completed")
 
 			// before applying mode update we should verify that upgrade process completed.
-			err, upgradeRunning := config.IsUpgradeStillRunning(kubeconfigPath)
+			upgradeRunning, err := config.IsUpgradeStillRunning(kubeconfigPath)
 			if err != nil || upgradeRunning {
 				log.WithFields(logrus.Fields{
 					"err":            err,
