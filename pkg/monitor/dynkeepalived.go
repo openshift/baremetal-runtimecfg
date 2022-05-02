@@ -74,12 +74,13 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) {
 		log.Warnf("Could not retrieve LB config: %v", err)
 	}
 
-	for _, c := range *newConfig.Configs {
-		c.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, c.Cluster.APIVIP)
+	for i, c := range *newConfig.Configs {
+		// Must do this by index instead of using c because c is local to this loop
+		(*newConfig.Configs)[i].IngressConfig, err = config.GetIngressConfig(kubeconfigPath, c.Cluster.APIVIP)
 		if err != nil {
 			log.Warnf("Could not retrieve ingress config: %v", err)
 		}
-		c.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(c.Cluster.APIVIP))
+		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(c.Cluster.APIVIP))
 		if err != nil {
 			log.Warnf("Could not retrieve LB config: %v", err)
 		}
@@ -450,6 +451,8 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			prevConfig = &newConfig
 
 			// Signal to keepalived whether the haproxy firewall rule is in place
+			// The rules are all managed as a single entity, so we should only need
+			// to check the first VIP.
 			ruleExists, err := checkHAProxyFirewallRules(apiVips[0].String(), apiPort, lbPort)
 			if err != nil {
 				log.Error("Failed to check for haproxy firewall rule")

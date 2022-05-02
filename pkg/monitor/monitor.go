@@ -26,7 +26,7 @@ type RuntimeConfig struct {
 	LBConfig *config.ApiLBConfig
 }
 
-func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, apiVip string, apiPort, lbPort, statPort uint16, interval time.Duration) error {
+func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath string, apiVips []string, apiPort, lbPort, statPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.ApiLBConfig
 	var K8sHealthSts bool = false
 	var oldK8sHealthSts bool
@@ -53,10 +53,12 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, 
 	for {
 		select {
 		case <-done:
-			cleanHAProxyFirewallRules(apiVip, apiPort, lbPort)
+			for _, apiVip := range apiVips {
+				cleanHAProxyFirewallRules(apiVip, apiPort, lbPort)
+			}
 			return nil
 		default:
-			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, net.ParseIP(apiVip))
+			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, net.ParseIP(apiVips[0]))
 			if err != nil {
 				log.WithFields(logrus.Fields{
 					"kubeconfigPath": kubeconfigPath,
@@ -119,15 +121,19 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath, 
 				if oldK8sHealthSts != K8sHealthSts {
 					log.Info("API is reachable through HAProxy")
 				}
-				err := ensureHAProxyFirewallRules(apiVip, apiPort, lbPort)
-				if err != nil {
-					log.WithFields(logrus.Fields{"err": err}).Error("Failed to ensure HAProxy firewall rules to direct traffic to the LB")
+				for _, apiVip := range apiVips {
+					err := ensureHAProxyFirewallRules(apiVip, apiPort, lbPort)
+					if err != nil {
+						log.WithFields(logrus.Fields{"err": err}).Error("Failed to ensure HAProxy firewall rules to direct traffic to the LB")
+					}
 				}
 			} else {
 				if oldK8sHealthSts != K8sHealthSts {
 					log.Info("API is not reachable through HAProxy")
 				}
-				cleanHAProxyFirewallRules(apiVip, apiPort, lbPort)
+				for _, apiVip := range apiVips {
+					cleanHAProxyFirewallRules(apiVip, apiPort, lbPort)
+				}
 			}
 			time.Sleep(interval)
 		}

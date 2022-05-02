@@ -448,7 +448,7 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 
 // getSortedBackends builds config to communicate with kube-api based on kubeconfigPath parameter value, if kubeconfigPath is not empty it will build the
 // config based on that content else config will point to localhost.
-func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool) (backends []Backend, err error) {
+func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, apiVip net.IP) (backends []Backend, err error) {
 
 	kubeApiServerUrl := ""
 	if readFromLocalAPI {
@@ -477,10 +477,11 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool) (backends [
 		}).Info("Failed to get master Nodes list")
 		return []Backend{}, err
 	}
+	apiVipv6 := utils.IsIPv6(apiVip)
 	for _, node := range nodes.Items {
 		masterIp := ""
 		for _, address := range node.Status.Addresses {
-			if address.Type == v1.NodeInternalIP {
+			if address.Type == v1.NodeInternalIP && utils.IsIPv6(net.ParseIP(address.Address)) == apiVipv6 {
 				masterIp = address.Address
 				break
 			}
@@ -510,11 +511,11 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, apiVip
 		config.FrontendAddr = "::"
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
-	backends, err := getSortedBackends(kubeconfigPath, false)
+	backends, err := getSortedBackends(kubeconfigPath, false, apiVip)
 	if err != nil {
 		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
 		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
-		backends, err = getSortedBackends(kubeconfigPath, true)
+		backends, err = getSortedBackends(kubeconfigPath, true, apiVip)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"kubeconfigPath": kubeconfigPath,
