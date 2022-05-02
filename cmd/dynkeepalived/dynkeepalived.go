@@ -47,7 +47,7 @@ func main() {
 			// format that the rest of the code now expects.
 			if len(ingressVips) < 1 && ingressVip != nil {
 				ingressVips = []net.IP{ingressVip}
-	}
+			}
 			apiPort, err := cmd.Flags().GetUint16("api-port")
 			if err != nil {
 				return err

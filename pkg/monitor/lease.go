@@ -27,10 +27,10 @@ type vip struct {
 }
 type yamlVips struct {
 	// Deprecated, use APIVips instead
-	APIVip     *vip `yaml:"api-vip"`
-	APIVips    []vip `yaml:"api-vips"`
+	APIVip  *vip  `yaml:"api-vip"`
+	APIVips []vip `yaml:"api-vips"`
 	// Deprecated, use IngressVips instead
-	IngressVip *vip `yaml:"ingress-vip"`
+	IngressVip  *vip  `yaml:"ingress-vip"`
 	IngressVips []vip `yaml:"ingress-vips"`
 }
 
