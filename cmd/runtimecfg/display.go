@@ -45,6 +45,8 @@ func runDisplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		apiVips = []net.IP{}
 	}
+	// If we were passed a VIP using the old interface, coerce it into the list
+	// format that the rest of the code now expects.
 	if len(apiVips) < 1 && apiVip != nil {
 		apiVips = []net.IP{apiVip}
 	}
@@ -56,6 +58,8 @@ func runDisplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		ingressVips = []net.IP{}
 	}
+	// If we were passed a VIP using the old interface, coerce it into the list
+	// format that the rest of the code now expects.
 	if len(ingressVips) < 1 && ingressVip != nil {
 		ingressVips = []net.IP{ingressVip}
 	}

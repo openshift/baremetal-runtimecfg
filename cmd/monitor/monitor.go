@@ -53,9 +53,12 @@ func main() {
 			if err != nil {
 				apiVips = []net.IP{}
 			}
+			// If we were passed a VIP using the old interface, coerce it into the list
+			// format that the rest of the code now expects.
 			if len(apiVips) < 1 && apiVip != nil {
 				apiVips = []net.IP{apiVip}
 			}
+			// The monitor takes strings, not net.IPs
 			apiVipStrings := []string{}
 			for _, vip := range apiVips {
 				apiVipStrings = append(apiVipStrings, vip.String())

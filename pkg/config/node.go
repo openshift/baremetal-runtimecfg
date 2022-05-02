@@ -326,6 +326,18 @@ func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig
 	return ingressConfig, nil
 }
 
+// Returns a Node object populated with the configuration specified by the parameters
+// to the function.
+// kubeconfigPath: The path to a kubeconfig that can be used to read cluster status
+// from the k8s api.
+// clusterConfigPath: The path to cluster-config.yaml. This is only available on the
+// bootstrap node so it is optional. If the file is not available, set this to "".
+// resolvConfPath: The path to resolv.conf. Typically either /etc/resolv.conf or
+// /var/run/NetworkManager/resolv.conf.
+// apiVips and ingressVips: Lists of VIPs for API and Ingress, respectively.
+// apiPort: The port on which the k8s api listens. Should be 6443.
+// lbPort: The port on which haproxy listens.
+// statPort: The port on which the haproxy stats endpoint listens.
 func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
 	vipCount := 0
 	if len(apiVips) > len(ingressVips) {
