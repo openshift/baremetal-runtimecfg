@@ -119,19 +119,19 @@ func isIPv6(ip net.IP) bool {
 	return ip.To4() == nil
 }
 
-// AddressesRouting takes a slice of Virtual IPs and returns a configured address in the current network namespace that directly routes to at least one of those vips. If the interface containing that address is dual-stack, it will also return a single address of the opposite IP family. You can optionally pass an AddressFilter to further filter down which addresses are considered
-func AddressesRouting(vips []net.IP, af AddressFilter) ([]net.IP, error) {
+// AddressesRouting takes a slice of Virtual IPs and returns a FoundAddress address in the current network namespace that directly routes to at least one of those vips. If the interface containing that address is dual-stack, it will also return a single address of the opposite IP family. You can optionally pass an AddressFilter to further filter down which addresses are considered
+func AddressesRouting(vips []net.IP, af AddressFilter) ([]FoundAddress, error) {
 	return addressesRoutingInternal(vips, af, getAddrs, getRouteMap)
 }
 
-func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
+func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]FoundAddress, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
 	}
 
 	var routeMap map[int][]netlink.Route
-	matches := make([]net.IP, 0)
+	matches := make([]FoundAddress, 0)
 	for link, addresses := range addrMap {
 	addrLoop:
 		for _, address := range addresses {
@@ -161,7 +161,12 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 							log.Debugf("Checking whether address %s with route %s contains VIP %s", address, route, vip)
 							if containmentNet.Contains(vip) {
 								log.Debugf("Address %s with route %s contains VIP %s", address, route, vip)
-								matches = append(matches, address.IP)
+								matches = append(matches, FoundAddress{
+									Address:   address.IP,
+									Priority:  route.Priority,
+									LinkIndex: link.Attrs().Index,
+									LinkName:  link.Attrs().Name,
+								})
 								break addrLoop
 							}
 						}
@@ -172,7 +177,11 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 					log.Debugf("Checking whether address %s contains VIP %s", address, vip)
 					if address.Contains(vip) {
 						log.Debugf("Address %s contains VIP %s", address, vip)
-						matches = append(matches, address.IP)
+						matches = append(matches, FoundAddress{
+							Address:   address.IP,
+							LinkIndex: link.Attrs().Index,
+							LinkName:  link.Attrs().Name,
+						})
 						break addrLoop
 					}
 				}
@@ -182,8 +191,13 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 		if len(matches) > 0 {
 			// Find an address of the opposite IP family on the same interface
 			for _, address := range addresses {
-				if isIPv6(address.IP) != isIPv6(matches[0]) {
-					matches = append(matches, address.IP)
+				if isIPv6(address.IP) != isIPv6(matches[0].Address) {
+					matches = append(matches, FoundAddress{
+						Address:   address.IP,
+						Priority:  matches[0].Priority,
+						LinkIndex: matches[0].LinkIndex,
+						LinkName:  matches[0].LinkName,
+					})
 					break
 				}
 			}
@@ -199,7 +213,7 @@ func defaultRoute(route netlink.Route) bool {
 }
 
 // AddressesDefault returns a slice of configured addresses in the current network namespace associated with default routes; IPv4 first (if any), then IPv6 (if any). You can optionally pass an AddressFilter to further filter down which addresses are considered
-func AddressesDefault(preferIPv6 bool, af AddressFilter) ([]net.IP, error) {
+func AddressesDefault(preferIPv6 bool, af AddressFilter) ([]FoundAddress, error) {
 	return addressesDefaultInternal(preferIPv6, af, getAddrs, getRouteMap)
 }
 
@@ -207,9 +221,10 @@ type FoundAddress struct {
 	Address   net.IP
 	Priority  int
 	LinkIndex int
+	LinkName  string
 }
 
-func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
+func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]FoundAddress, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
@@ -219,7 +234,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 		return nil, err
 	}
 
-	matches := make([]net.IP, 0)
+	matches := make([]FoundAddress, 0)
 	addrs := make([]FoundAddress, 0)
 	for link, addresses := range addrMap {
 		linkIndex := link.Attrs().Index
@@ -233,6 +248,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 				Address:   address.IP,
 				Priority:  routeMap[linkIndex][0].Priority,
 				LinkIndex: linkIndex,
+				LinkName:  link.Attrs().Name,
 			})
 		}
 	}
@@ -256,7 +272,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 		if (isIPv6(addr.Address) && foundv6) || (!isIPv6(addr.Address) && foundv4) {
 			continue
 		}
-		matches = append(matches, addr.Address)
+		matches = append(matches, addr)
 		if isIPv6(addr.Address) {
 			foundv6 = true
 		} else {

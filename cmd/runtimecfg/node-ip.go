@@ -18,6 +18,8 @@ import (
 const (
 	kubeletSvcOverridePath = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
 	crioSvcOverridePath    = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
+	interfaceFile          = "/run/nodeip-configuration/interface"
+	primaryFile            = "/run/nodeip-configuration/primary-ip"
 )
 
 var retry, preferIPv6 bool
@@ -104,10 +106,10 @@ func set(cmd *cobra.Command, args []string) error {
 	}
 	defer kOverride.Close()
 
-	nodeIP := chosenAddresses[0].String()
+	nodeIP := chosenAddresses[0].Address.String()
 	nodeIPs := nodeIP
 	if len(chosenAddresses) > 1 {
-		nodeIPs += "," + chosenAddresses[1].String()
+		nodeIPs += "," + chosenAddresses[1].Address.String()
 	}
 	kOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"KUBELET_NODE_IP=%s\" \"KUBELET_NODE_IPS=%s\"\n", nodeIP, nodeIPs)
 	log.Infof("Writing Kubelet service override with content %s", kOverrideContent)
@@ -129,27 +131,70 @@ func set(cmd *cobra.Command, args []string) error {
 	}
 	defer cOverride.Close()
 
-	cOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"CONTAINER_STREAM_ADDRESS=%s\"\n", chosenAddresses[0])
+	cOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"CONTAINER_STREAM_ADDRESS=%s\"\n", chosenAddresses[0].Address)
 	log.Infof("Writing CRI-O service override with content %s", cOverrideContent)
 	_, err = cOverride.WriteString(cOverrideContent)
 	if err != nil {
 		return err
 	}
+
+	// Set interface in case it is not br-ex that means that it was already configured and node is rebooting
+	// in that case don't change the previous written interface
+	if chosenAddresses[0].LinkName != "br-ex" {
+		interfaceDir := filepath.Dir(interfaceFile)
+		err = os.MkdirAll(interfaceDir, 0755)
+		if err != nil {
+			return err
+		}
+		log.Infof("Opening interface file %s", interfaceFile)
+		iFile, err := os.Create(interfaceFile)
+		if err != nil {
+			return err
+		}
+		defer iFile.Close()
+		interfaceContent := fmt.Sprintf("NODE_IP_INTERFACE=%s\"\n", chosenAddresses[0].LinkName)
+		log.Infof("Writing interface file content %s", interfaceContent)
+		_, err = iFile.WriteString(interfaceContent)
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Infof("Skipping set interface file as bridge was already configured on the expected interface")
+	}
+
+	// set node ip for those who wants to use it
+	primaryIpDir := filepath.Dir(primaryFile)
+	err = os.MkdirAll(primaryIpDir, 0755)
+	if err != nil {
+		return err
+	}
+	log.Infof("Opening primary ip file %s", primaryFile)
+	primaryIPFile, err := os.Create(primaryFile)
+	if err != nil {
+		return err
+	}
+	defer primaryIPFile.Close()
+	primaryIPContent := fmt.Sprintf("NODE_IP_PRIMARY_IP=%s\"\n", nodeIP)
+	log.Infof("Writing node ip primary file with content %s", primaryIPContent)
+	_, err = primaryIPFile.WriteString(primaryIPContent)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, err error) {
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []utils.FoundAddress, err error) {
 	// Enable debug logging in utils package
 	utils.SetDebugLogLevel()
 	for {
 		if len(vips) > 0 {
 			chosen, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
 			if len(chosen) > 0 || err != nil {
-
 				// If using IPv6, verify that the choosen address isn't tentative
 				// i.e. we can actually bind to it
-				if len(chosen) > 0 && net.IPv6len == len(chosen[0]) {
-					_, err := net.Listen("tcp", "["+chosen[0].String()+"]:")
+				if len(chosen) > 0 && net.IPv6len == len(chosen[0].Address) {
+					_, err := net.Listen("tcp", "["+chosen[0].Address.String()+"]:")
 					if err != nil {
 						log.Errorf("Chosen node IP is not usable")
 						if !retry {
