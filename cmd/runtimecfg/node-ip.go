@@ -12,14 +12,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
 const (
 	kubeletSvcOverridePath = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
 	nodeIpFile             = "/run/nodeip-configuration/primary-ip"
-	nodeIpIpV6File         = "/run/nodeip-configuration/ipv6"
-	nodeIpIpV4File         = "/run/nodeip-configuration/ipv4"
+	nodeIpIpV6File         = config.NodeIpIpV6File
+	nodeIpIpV4File         = config.NodeIpIpV4File
 	crioSvcOverridePath    = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
 )
 
@@ -83,6 +84,13 @@ func show(cmd *cobra.Command, args []string) error {
 }
 
 func set(cmd *cobra.Command, args []string) error {
+	// If primary ip address was already created, it means that nodeip-configuration has run already and no need to
+	// choose new ip, we should leave same configuration as we already set
+	if ip, err := config.GetIpFromFile(nodeIpFile); err == nil {
+		log.Infof("Found ip %s in %s, no need for new configuration, exiting", ip, nodeIpFile)
+		return nil
+	}
+
 	vips, err := parseIPs(args)
 	if err != nil {
 		return err

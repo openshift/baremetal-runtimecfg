@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"sort"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -264,4 +267,33 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 		}
 	}
 	return matches, nil
+}
+
+func GetInterfaceWithCidrByIP(ip net.IP) (*net.Interface, *net.IPNet, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			log.WithError(err).Warnf("Failed to get addresses for %s interface", iface.Name)
+			continue
+		}
+		for _, addr := range addrs {
+			switch n := addr.(type) {
+			case *net.IPNet:
+				ifaceIp, _, err := net.ParseCIDR(strings.Replace(addr.String(), "/128", "/64", 1))
+				if err == nil {
+					if ifaceIp.Equal(ip) {
+						return &iface, n, nil
+					}
+
+				}
+			default:
+				fmt.Println("not supported addr")
+			}
+		}
+	}
+	return nil, nil, errors.New(fmt.Sprintf("failed find a interface for the ip %s", ip.String()))
 }
