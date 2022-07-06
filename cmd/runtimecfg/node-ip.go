@@ -17,6 +17,9 @@ import (
 
 const (
 	kubeletSvcOverridePath = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
+	nodeIpFile             = "/run/nodeip-configuration/primary-ip"
+	nodeIpIpV6File         = "/run/nodeip-configuration/ipv6"
+	nodeIpIpV4File         = "/run/nodeip-configuration/ipv4"
 	crioSvcOverridePath    = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
 )
 
@@ -91,47 +94,68 @@ func set(cmd *cobra.Command, args []string) error {
 	}
 	log.Infof("Chosen Node IPs: %v", chosenAddresses)
 
-	// Kubelet
-	kubeletOverrideDir := filepath.Dir(kubeletSvcOverridePath)
-	err = os.MkdirAll(kubeletOverrideDir, 0755)
-	if err != nil {
-		return err
-	}
-	log.Infof("Opening Kubelet service override path %s", kubeletSvcOverridePath)
-	kOverride, err := os.Create(kubeletSvcOverridePath)
-	if err != nil {
-		return err
-	}
-	defer kOverride.Close()
-
 	nodeIP := chosenAddresses[0].String()
 	nodeIPs := nodeIP
 	if len(chosenAddresses) > 1 {
 		nodeIPs += "," + chosenAddresses[1].String()
 	}
+	// Kubelet
 	kOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"KUBELET_NODE_IP=%s\" \"KUBELET_NODE_IPS=%s\"\n", nodeIP, nodeIPs)
 	log.Infof("Writing Kubelet service override with content %s", kOverrideContent)
-	_, err = kOverride.WriteString(kOverrideContent)
+	err = writeToFile(kubeletSvcOverridePath, kOverrideContent)
 	if err != nil {
 		return err
 	}
 
 	// CRI-O
-	crioOverrideDir := filepath.Dir(crioSvcOverridePath)
-	err = os.MkdirAll(crioOverrideDir, 0755)
+	cOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"CONTAINER_STREAM_ADDRESS=%s\"\n", nodeIP)
+	log.Infof("Writing CRIO service override with content %s", cOverrideContent)
+	err = writeToFile(crioSvcOverridePath, cOverrideContent)
 	if err != nil {
 		return err
 	}
-	log.Infof("Opening CRI-O service override path %s", crioSvcOverridePath)
-	cOverride, err := os.Create(crioSvcOverridePath)
-	if err != nil {
-		return err
-	}
-	defer cOverride.Close()
 
-	cOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"CONTAINER_STREAM_ADDRESS=%s\"\n", chosenAddresses[0])
-	log.Infof("Writing CRI-O service override with content %s", cOverrideContent)
-	_, err = cOverride.WriteString(cOverrideContent)
+	// node ip hint for all other services
+	err = writeToFile(nodeIpFile, nodeIP)
+	if err != nil {
+		return err
+	}
+
+	ipv6Created, ipv4Created := false, false
+	for i := 0; i < len(chosenAddresses) && i < 2; i++ {
+		if utils.IsIPv6(chosenAddresses[i]) && !ipv6Created {
+			err = writeToFile(nodeIpIpV6File, chosenAddresses[i].String())
+			if err != nil {
+				return err
+			}
+			ipv6Created = true
+		} else if !utils.IsIPv6(chosenAddresses[i]) && !ipv4Created {
+			err = writeToFile(nodeIpIpV4File, chosenAddresses[i].String())
+			if err != nil {
+				return err
+			}
+			ipv4Created = true
+		}
+	}
+
+	return nil
+}
+
+func writeToFile(path string, data string) error {
+	dir := filepath.Dir(path)
+	err := os.MkdirAll(dir, 0755)
+	if err != nil {
+		return err
+	}
+	log.Infof("Opening path %s", path)
+	fileToCreate, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer fileToCreate.Close()
+
+	log.Infof("Writing path %s with content %s", path, data)
+	_, err = fileToCreate.WriteString(data)
 	if err != nil {
 		return err
 	}
