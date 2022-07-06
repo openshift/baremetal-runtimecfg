@@ -17,6 +17,7 @@ import (
 
 const (
 	kubeletSvcOverridePath = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
+	nodeIpFile             = "/etc/default/node_ip"
 	crioSvcOverridePath    = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
 )
 
@@ -135,6 +136,27 @@ func set(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// node ip hint for all other services
+	nodeIpOverrideDir := filepath.Dir(nodeIpFile)
+	err = os.MkdirAll(nodeIpOverrideDir, 0755)
+	if err != nil {
+		return err
+	}
+	log.Infof("Opening node ip override path %s", nodeIpFile)
+	nodeIpOverride, err := os.Create(nodeIpFile)
+	if err != nil {
+		return err
+	}
+	defer nodeIpOverride.Close()
+
+	nodeIpOverrideContent := fmt.Sprintf("NODE_IP=%s\n", nodeIP)
+	log.Infof("Writing %s override with content %s", nodeIpFile, nodeIpOverrideContent)
+	_, err = nodeIpOverride.WriteString(nodeIpOverrideContent)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
