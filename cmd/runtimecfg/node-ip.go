@@ -138,6 +138,19 @@ func set(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func checkAddressUsable(chosen []net.IP) (err error) {
+	// If using IPv6, verify that the choosen address isn't tentative
+	// i.e. we can actually bind to it
+	if len(chosen) > 0 && net.IPv6len == len(chosen[0]) {
+		_, err = net.Listen("tcp", "["+chosen[0].String()+"]:")
+		if err != nil {
+			log.Errorf("Chosen node IP is not usable")
+			return err
+		}
+	}
+	return err
+}
+
 func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, err error) {
 	// Enable debug logging in utils package
 	utils.SetDebugLogLevel()
@@ -145,19 +158,15 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 		if len(vips) > 0 {
 			chosen, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
 			if len(chosen) > 0 || err != nil {
-
-				// If using IPv6, verify that the choosen address isn't tentative
-				// i.e. we can actually bind to it
-				if len(chosen) > 0 && net.IPv6len == len(chosen[0]) {
-					_, err := net.Listen("tcp", "["+chosen[0].String()+"]:")
-					if err != nil {
-						log.Errorf("Chosen node IP is not usable")
-						if !retry {
-							return nil, fmt.Errorf("Failed to find node IP")
-						}
-						time.Sleep(time.Second)
-						continue
+				if err == nil {
+					err = checkAddressUsable(chosen)
+				}
+				if err != nil {
+					if !retry {
+						return nil, fmt.Errorf("Failed to find node IP")
 					}
+					time.Sleep(time.Second)
+					continue
 				}
 				return chosen, err
 			}
@@ -165,6 +174,16 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 		if len(chosen) == 0 {
 			chosen, err = utils.AddressesDefault(preferIPv6, utils.ValidNodeAddress)
 			if len(chosen) > 0 || err != nil {
+				if err == nil {
+					err = checkAddressUsable(chosen)
+				}
+				if err != nil {
+					if !retry {
+						return nil, fmt.Errorf("Failed to find node IP")
+					}
+					time.Sleep(time.Second)
+					continue
+				}
 				return chosen, err
 			}
 		}
