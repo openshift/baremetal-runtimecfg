@@ -78,25 +78,25 @@ func parseMonitorFile(buffer []byte) (*yamlVips, error) {
 		return nil, err
 	}
 
-	if vips.APIVip == nil && vips.APIVips == nil {
+	if vips.APIVip == nil && len(vips.APIVips) < 1 {
 		err := fmt.Errorf("APIVip(s) missing from the yaml content")
 		log.Error(err)
 		return nil, err
-	} else if vips.IngressVip == nil && vips.IngressVips == nil {
+	} else if vips.IngressVip == nil && len(vips.IngressVips) < 1 {
 		err := fmt.Errorf("IngressVIP(s) missing from the yaml")
 		log.Error(err)
 		return nil, err
 	}
 
 	// Convert old-style single vip configs to the dual vip format
-	if vips.APIVips == nil {
+	if len(vips.APIVips) < 1 {
 		vips.APIVips = []vip{*vips.APIVip}
 	}
-	if vips.IngressVips == nil {
+	if len(vips.IngressVips) < 1 {
 		vips.IngressVips = []vip{*vips.IngressVip}
 	}
 
-	log.Info(fmt.Sprintf("Valid monitor file format. APIVip: %+v. APIVips: %+v. IngressVip: %+v. IngressVips: %+v.", vips.APIVips, vips.IngressVips))
+	log.Info(fmt.Sprintf("Valid monitor file format. APIVip: %+v. APIVips: %+v. IngressVip: %+v. IngressVips: %+v.", vips.APIVip, vips.APIVips, vips.IngressVip, vips.IngressVips))
 
 	return &vips, nil
 }

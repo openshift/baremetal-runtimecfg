@@ -328,9 +328,11 @@ var _ = Describe("getVipsToLease", func() {
 	})
 
 	It("valid_yaml_content", func() {
+		api := vip{"api", generateMac().String(), generateIP()}
+		ingress := vip{"ingress", generateMac().String(), generateIP()}
 		data := yamlVips{
-			APIVip:     &vip{"api", generateMac().String(), generateIP()},
-			IngressVip: &vip{"ingress", generateMac().String(), generateIP()},
+			APIVips:     []vip{api},
+			IngressVips: []vip{ingress},
 		}
 
 		buffer, err := yaml.Marshal(&data)
