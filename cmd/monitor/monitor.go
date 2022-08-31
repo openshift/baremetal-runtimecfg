@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -46,16 +47,31 @@ func main() {
 
 			apiVip, err := cmd.Flags().GetIP("api-vip")
 			if err != nil {
-				return err
+				apiVip = nil
 			}
-			return monitor.Monitor(args[0], clusterName, clusterDomain, args[1], args[2], apiVip.String(), apiPort, lbPort, statPort, checkInterval)
+			apiVips, err := cmd.Flags().GetIPSlice("api-vips")
+			if err != nil {
+				apiVips = []net.IP{}
+			}
+			// If we were passed a VIP using the old interface, coerce it into the list
+			// format that the rest of the code now expects.
+			if len(apiVips) < 1 && apiVip != nil {
+				apiVips = []net.IP{apiVip}
+			}
+			// The monitor takes strings, not net.IPs
+			apiVipStrings := []string{}
+			for _, vip := range apiVips {
+				apiVipStrings = append(apiVipStrings, vip.String())
+			}
+			return monitor.Monitor(args[0], clusterName, clusterDomain, args[1], args[2], apiVipStrings, apiPort, lbPort, statPort, checkInterval)
 		},
 	}
 	rootCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens")
 	rootCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen")
 	rootCmd.Flags().Uint16("stat-port", 29445, "Port where the HAProxy stats API will listen")
 	rootCmd.Flags().Duration("check-interval", time.Second*6, "Time between monitor checks")
-	rootCmd.Flags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
+	rootCmd.Flags().IP("api-vip", nil, "DEPRECATED: Virtual IP Address to reach the OpenShift API")
+	rootCmd.Flags().IPSlice("api-vips", nil, "Virtual IP Addresses to reach the OpenShift API")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
 	}

@@ -26,8 +26,12 @@ type vip struct {
 	IpAddress  string `yaml:"ip-address"`
 }
 type yamlVips struct {
-	APIVip     *vip `yaml:"api-vip"`
-	IngressVip *vip `yaml:"ingress-vip"`
+	// Deprecated, use APIVips instead
+	APIVip  *vip  `yaml:"api-vip"`
+	APIVips []vip `yaml:"api-vips"`
+	// Deprecated, use IngressVips instead
+	IngressVip  *vip  `yaml:"ingress-vip"`
+	IngressVips []vip `yaml:"ingress-vips"`
 }
 
 func getVipsToLease(cfgPath string) (vips *yamlVips, err error) {
@@ -74,17 +78,25 @@ func parseMonitorFile(buffer []byte) (*yamlVips, error) {
 		return nil, err
 	}
 
-	if vips.APIVip == nil {
-		err := fmt.Errorf("APIVip is missing from the yaml content")
+	if vips.APIVip == nil && len(vips.APIVips) < 1 {
+		err := fmt.Errorf("APIVip(s) missing from the yaml content")
 		log.Error(err)
 		return nil, err
-	} else if vips.IngressVip == nil {
-		err := fmt.Errorf("IngressVIP is missing from the yaml")
+	} else if vips.IngressVip == nil && len(vips.IngressVips) < 1 {
+		err := fmt.Errorf("IngressVIP(s) missing from the yaml")
 		log.Error(err)
 		return nil, err
 	}
 
-	log.Info(fmt.Sprintf("Valid monitor file format. APIVip: %+v. IngressVip: %+v", *vips.APIVip, vips.IngressVip))
+	// Convert old-style single vip configs to the dual vip format
+	if len(vips.APIVips) < 1 {
+		vips.APIVips = []vip{*vips.APIVip}
+	}
+	if len(vips.IngressVips) < 1 {
+		vips.IngressVips = []vip{*vips.IngressVip}
+	}
+
+	log.Info(fmt.Sprintf("Valid monitor file format. APIVip: %+v. APIVips: %+v. IngressVip: %+v. IngressVips: %+v.", vips.APIVip, vips.APIVips, vips.IngressVip, vips.IngressVips))
 
 	return &vips, nil
 }

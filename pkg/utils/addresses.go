@@ -115,7 +115,7 @@ func usableIPv6Route(route netlink.Route) bool {
 	return true
 }
 
-func isIPv6(ip net.IP) bool {
+func IsIPv6(ip net.IP) bool {
 	return ip.To4() == nil
 }
 
@@ -182,7 +182,7 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 		if len(matches) > 0 {
 			// Find an address of the opposite IP family on the same interface
 			for _, address := range addresses {
-				if isIPv6(address.IP) != isIPv6(matches[0]) {
+				if IsIPv6(address.IP) != IsIPv6(matches[0]) {
 					matches = append(matches, address.IP)
 					break
 				}
@@ -243,7 +243,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	sort.SliceStable(addrs, func(i, j int) bool {
 		if addrs[i].Priority == addrs[j].Priority {
 			if addrs[i].LinkIndex == addrs[j].LinkIndex {
-				return isIPv6(addrs[i].Address) == preferIPv6 && isIPv6(addrs[j].Address) != preferIPv6
+				return IsIPv6(addrs[i].Address) == preferIPv6 && IsIPv6(addrs[j].Address) != preferIPv6
 			}
 			return addrs[i].LinkIndex < addrs[j].LinkIndex
 		}
@@ -253,11 +253,11 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	foundv4 := false
 	foundv6 := false
 	for _, addr := range addrs {
-		if (isIPv6(addr.Address) && foundv6) || (!isIPv6(addr.Address) && foundv4) {
+		if (IsIPv6(addr.Address) && foundv6) || (!IsIPv6(addr.Address) && foundv4) {
 			continue
 		}
 		matches = append(matches, addr.Address)
-		if isIPv6(addr.Address) {
+		if IsIPv6(addr.Address) {
 			foundv6 = true
 		} else {
 			foundv4 = true

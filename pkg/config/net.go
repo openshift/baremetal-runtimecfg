@@ -8,6 +8,7 @@ import (
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
+// NOTE(bnemec): All addresses in the vips array must be the same ip version
 func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	if len(vips) < 1 {
 		return vipIface, nonVipAddr, fmt.Errorf("At least one VIP needs to be fed to this function")

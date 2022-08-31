@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"time"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/monitor"
@@ -23,9 +24,27 @@ func main() {
 			if err != nil {
 				apiVip = nil
 			}
+			apiVips, err := cmd.Flags().GetIPSlice("api-vips")
+			if err != nil {
+				apiVips = []net.IP{}
+			}
+			// If we were passed a VIP using the old interface, coerce it into the list
+			// format that the rest of the code now expects.
+			if len(apiVips) < 1 && apiVip != nil {
+				apiVips = []net.IP{apiVip}
+			}
 			ingressVip, err := cmd.Flags().GetIP("ingress-vip")
 			if err != nil {
 				ingressVip = nil
+			}
+			ingressVips, err := cmd.Flags().GetIPSlice("ingress-vips")
+			if err != nil {
+				ingressVips = []net.IP{}
+			}
+			// If we were passed a VIP using the old interface, coerce it into the list
+			// format that the rest of the code now expects.
+			if len(ingressVips) < 1 && ingressVip != nil {
+				ingressVips = []net.IP{ingressVip}
 			}
 
 			checkInterval, err := cmd.Flags().GetDuration("check-interval")
@@ -37,13 +56,15 @@ func main() {
 				return err
 			}
 
-			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVip, ingressVip, checkInterval)
+			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, checkInterval)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
 	rootCmd.Flags().Duration("check-interval", time.Second*30, "Time between coredns watch checks")
-	rootCmd.Flags().IP("api-vip", nil, "Virtual IP Address to reach the OpenShift API")
-	rootCmd.PersistentFlags().IP("ingress-vip", nil, "Virtual IP Address to reach the OpenShift Ingress Routers")
+	rootCmd.Flags().IP("api-vip", nil, "DEPRECATED: Virtual IP Address to reach the OpenShift API")
+	rootCmd.Flags().IPSlice("api-vips", nil, "Virtual IP Addresses to reach the OpenShift API")
+	rootCmd.Flags().IP("ingress-vip", nil, "DEPRECATED: Virtual IP Address to reach the OpenShift Ingress Routers")
+	rootCmd.Flags().IPSlice("ingress-vips", nil, "Virtual IP Addresses to reach the OpenShift Ingress Routers")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
 	}

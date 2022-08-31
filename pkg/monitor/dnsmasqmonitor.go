@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func DnsmasqWatch(kubeconfigPath, templatePath, cfgPath string, apiVip net.IP, interval time.Duration) error {
+func DnsmasqWatch(kubeconfigPath, templatePath, cfgPath string, apiVips []net.IP, interval time.Duration) error {
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 	prevMD5 := ""
@@ -33,7 +33,7 @@ func DnsmasqWatch(kubeconfigPath, templatePath, cfgPath string, apiVip net.IP, i
 			return nil
 		default:
 			// We only care about the api vip and cluster domain here
-			config, err := config.GetConfig(kubeconfigPath, "", "/etc/resolv.conf", apiVip, apiVip, 0, 0, 0)
+			config, err := config.GetConfig(kubeconfigPath, "", "/etc/resolv.conf", apiVips, apiVips, 0, 0, 0)
 			if err != nil {
 				return err
 			}
