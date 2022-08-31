@@ -52,6 +52,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	}
 	// If we were passed a VIP using the old interface, coerce it into the list
 	// format that the rest of the code now expects.
+	// This can be removed when the deprecated single VIP interface goes away
 	if len(apiVips) < 1 && apiVip != nil {
 		apiVips = []net.IP{apiVip}
 	}
@@ -65,6 +66,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	}
 	// If we were passed a VIP using the old interface, coerce it into the list
 	// format that the rest of the code now expects.
+	// This can be removed when the deprecated single VIP interface goes away
 	if len(ingressVips) < 1 && ingressVip != nil {
 		ingressVips = []net.IP{ingressVip}
 	}
