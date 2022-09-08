@@ -33,6 +33,9 @@ func init() {
 	renderCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen at")
 	renderCmd.Flags().Uint16("stat-port", 29445, "Port where the HAProxy stats API will listen at")
 	renderCmd.Flags().StringP("resolvconf-path", "r", "/etc/resolv.conf", "Optional path to a resolv.conf file to use to get upstream DNS servers")
+	renderCmd.Flags().IPSlice("bgp-neighbors", nil, "IP Addresses of the BGP neighbors")
+	renderCmd.Flags().StringP("bgp-asn", "", "", "ASN of the BGP neighbors")
+	renderCmd.Flags().StringP("bgp-password", "", "", "Password of the BGP neighbors")
 	rootCmd.AddCommand(renderCmd)
 }
 
@@ -80,6 +83,23 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	bgpNeighbors, err := cmd.Flags().GetIPSlice("bgp-neighbors")
+	if err != nil {
+		bgpNeighbors = []net.IP{}
+	}
+	bgpAsn, err := cmd.Flags().GetString("bgp-asn")
+	if err != nil {
+		return nil
+	}
+	bgpPassword, err := cmd.Flags().GetString("bgp-password")
+	if err != nil {
+		return nil
+	}
+	bgpConfig := config.BGPConfig{
+		ASN:       bgpAsn,
+		Neighbors: bgpNeighbors,
+		Password:  bgpPassword,
+	}
 	clusterConfigPath, err := cmd.Flags().GetString("cluster-config")
 	if err != nil {
 		return err
@@ -88,7 +108,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort)
+	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, bgpConfig)
 	if err != nil {
 		return err
 	}

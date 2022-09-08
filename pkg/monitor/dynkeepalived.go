@@ -347,7 +347,8 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0)
+			emptyBGPConfig := config.BGPConfig{}
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, emptyBGPConfig)
 			if err != nil {
 				return err
 			}
@@ -394,7 +395,8 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			appliedConfig = curConfig
 
 		default:
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0)
+			emptyBGPConfig := config.BGPConfig{}
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, emptyBGPConfig)
 			if err != nil {
 				return err
 			}

@@ -42,7 +42,8 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 			if err != nil {
 				return err
 			}
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0)
+			emptyBGPConfig := config.BGPConfig{}
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0, emptyBGPConfig)
 			if err != nil {
 				return err
 			}

@@ -81,6 +81,13 @@ type Node struct {
 	IngressConfig IngressConfig
 	EnableUnicast bool
 	Configs       *[]Node
+	BGPConfig     BGPConfig
+}
+
+type BGPConfig struct {
+	ASN       string
+	Neighbors []net.IP
+	Password  string
 }
 
 func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
@@ -338,7 +345,8 @@ func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig
 // apiPort: The port on which the k8s api listens. Should be 6443.
 // lbPort: The port on which haproxy listens.
 // statPort: The port on which the haproxy stats endpoint listens.
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+// bgpConfig: The BGP configuration to use.
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, bgpConfig BGPConfig) (node Node, err error) {
 	vipCount := 0
 	if len(apiVips) > len(ingressVips) {
 		vipCount = len(apiVips)
@@ -358,7 +366,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 		} else {
 			ingressVip = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort, bgpConfig)
 		if err != nil {
 			return Node{}, err
 		}
@@ -368,7 +376,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 	return nodes[0], nil
 }
 
-func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, bgpConfig BGPConfig) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
 		return node, err
@@ -454,6 +462,8 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 		LbPort:   lbPort,
 		StatPort: statPort,
 	}
+
+	node.BGPConfig = bgpConfig
 
 	return node, err
 }
