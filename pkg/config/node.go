@@ -13,12 +13,14 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
+	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	apiv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"github.com/openshift/installer/pkg/types"
 )
@@ -248,6 +250,30 @@ func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
 		}
 	}
 	return nodeCluster, nil
+}
+
+func GetBGPConfig(kubeconfigPath string) (*apiv1.OpenStackAPIBGPConfiguration, error) {
+	ctx := context.TODO()
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	configClient, err := configclient.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to establish API server connection")
+	}
+	infra, err := configClient.ConfigV1().Infrastructures().Get(ctx, "cluster", metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to find Infra config")
+	}
+
+	if infra.Spec.PlatformSpec.OpenStack == nil {
+		return nil, fmt.Errorf("Failed to find OpenStack platform spec")
+	}
+
+	return infra.Spec.PlatformSpec.OpenStack.APILoadBalancer.BGP, nil
 }
 
 // IsTheSameConfig will compare the config annotations
