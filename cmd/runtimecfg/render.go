@@ -81,12 +81,11 @@ func runRender(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	bgpConfig, err := config.GetBGPConfig(kubeCfgPath)
-	bgpConfig := config.BGPConfig{
-		ASN:       bgpAsn,
-		Neighbors: bgpNeighbors,
-		Password:  bgpPassword,
+	bgpConfig, err := config.GetBGPConfig()
+	if err != nil {
+		return err
 	}
+
 	clusterConfigPath, err := cmd.Flags().GetString("cluster-config")
 	if err != nil {
 		return err
