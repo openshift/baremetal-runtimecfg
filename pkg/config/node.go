@@ -200,17 +200,17 @@ func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAdd
 // and return a map with the data.
 //
 // i.e:
+//
 //	node-role.kubernetes.io/master
 //	node-role.kubernetes.io/worker
 //	node-role.kubernetes.io/infra
 //	etc.
 //
 // Args:
-//      - kubeconfigPath as string
+//   - kubeconfigPath as string
 //
 // Returns:
-//      - map[string][]v1.Node or error
-//
+//   - map[string][]v1.Node or error
 func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
 	nodeCluster := make(map[string][]v1.Node)
 
@@ -246,11 +246,10 @@ func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
 // IsTheSameConfig will compare the config annotations
 //
 // Args:
-//      - The node list based on v1.NodeList
+//   - The node list based on v1.NodeList
 //
 // Returns:
-//      - true (same config) or false
-//
+//   - true (same config) or false
 func IsTheSameConfig(nodes []v1.Node) bool {
 	desiredConfig := "machineconfiguration.openshift.io/desiredConfig"
 	currentConfig := "machineconfiguration.openshift.io/currentConfig"
@@ -268,11 +267,10 @@ func IsTheSameConfig(nodes []v1.Node) bool {
 // comparing the node's state.
 //
 // Args:
-//      - kubeconfigPath as string
+//   - kubeconfigPath as string
 //
 // Returns:
-//      - true (same config), false or error
-//
+//   - true (same config), false or error
 func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	nodes, err := GetNodes(kubeconfigPath)
 	if err != nil {
