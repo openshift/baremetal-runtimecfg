@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"crypto/tls"
 
 	"gopkg.in/yaml.v2"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 	"github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -29,6 +32,10 @@ const (
 	modeUpdateIntervalInSec       time.Duration = 600
 	processingTimeInSec           uint16        = 30
 	iptablesFilePath                            = "/var/run/keepalived/iptables-rule-exists"
+	haproxyFilePath                             = "/var/run/keepalived/haproxy-healthy"
+	haproxyCheckInterval                        = time.Second * 2
+	bigRise = 30
+	smallRise = 3
 	bootstrapApiFailuresThreshold int           = 4
 )
 
@@ -38,6 +45,14 @@ const (
 	stopped APIState = iota
 	started APIState = iota
 )
+
+type haproxyCheckStatus struct {
+	fall int
+	rise int
+	current bool
+	failCount int
+	passCount int
+}
 
 func getActualMode(cfgPath string) (error, bool) {
 	enableUnicast := false
@@ -282,6 +297,147 @@ func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
 	return nil
 }
 
+func haproxyHealthCheck(lbPort uint16) {
+	haproxyStatus := haproxyCheckStatus{fall: 3, rise: smallRise, current: true, failCount: 0, passCount: 3}
+	for {
+		// Signal to keepalived whether haproxy on this node seems healthy
+		// This is being done here instead of in a check script so we can
+		// have more sophisticated logic than a check script allows
+		haproxyHealthy := checkHAProxyHealth(lbPort, &haproxyStatus)
+		// TODO: Factor out the file creation logic that is shared with the
+		// firewall check
+		_, err := os.Stat(haproxyFilePath)
+		fileExists := !os.IsNotExist(err)
+		if haproxyHealthy {
+			if !fileExists {
+				_, err := os.Create(haproxyFilePath)
+				if err != nil {
+					log.WithFields(logrus.Fields{"path": haproxyFilePath}).Error("Failed to create file")
+				}
+			}
+		} else {
+			if fileExists {
+				err := os.Remove(haproxyFilePath)
+				if err != nil {
+					log.WithFields(logrus.Fields{"path": haproxyFilePath}).Error("Failed to remove file")
+				}
+			}
+		}
+		time.Sleep(haproxyCheckInterval)
+	}
+}
+
+func checkHAProxyHealth(port uint16, status *haproxyCheckStatus) bool {
+	current := false
+	code := -1
+	message := ""
+
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+    client := &http.Client{Transport: tr}
+	response, err := client.Get(fmt.Sprintf("https://localhost:%v/readyz", port))
+	if err == nil {
+		defer response.Body.Close()
+		defer client.CloseIdleConnections()
+		code = response.StatusCode
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			current = true
+		}
+	} else {
+		message = err.Error()
+	}
+	// This can probably be rolled into the if above
+	if current {
+		status.passCount++
+		status.failCount = 0
+	} else {
+		status.failCount++
+		status.passCount = 0
+	}
+	// Adjust fall value based on whether we have the VIP
+	if haveAPIVIP() {
+		// We didn't have it previously, log a message
+		if status.rise == bigRise {
+			log.Info("Node now holding API VIP")
+		}
+		status.rise = smallRise
+	} else {
+		if status.rise == smallRise {
+			log.Info("Node lost API VIP")
+		}
+		status.rise = bigRise
+	}
+	if !current {
+		if status.failCount >= status.fall {
+			status.current = false
+		}
+		log.WithFields(logrus.Fields{
+			"code": code,
+			"failCount": status.failCount,
+			"fall": status.fall,
+			"rise": status.rise,
+			"current": status.current,
+			"message": message,
+		}).Info("HAProxy Healthcheck Failed")
+	} else  {
+		if status.passCount >= status.rise {
+			status.current = true
+		}
+		// Only log passes while status is rising so we don't spam the logs under
+		// ordinary circumstances
+		if (status.passCount < status.rise && !status.current) || status.passCount == status.rise {
+			log.WithFields(logrus.Fields{
+				"code": code,
+				"passCount": status.passCount,
+				"fall": status.fall,
+				"rise": status.rise,
+				"current": status.current,
+			}).Info("HAProxy Healthcheck Passed")
+		}
+	}
+	return status.current
+}
+
+// TODO: Pass in API VIP and interface
+func haveAPIVIP() bool {
+	nlHandle, err := netlink.NewHandle(unix.NETLINK_ROUTE)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+				"err": err,
+			}).Error("haveAPIVIP: Failed to get handle")
+		return false
+	}
+	defer nlHandle.Delete()
+
+	link, err := nlHandle.LinkByName("enp2s0")
+	if err != nil {
+		log.WithFields(logrus.Fields{
+				"err": err,
+			}).Error("haveAPIVIP: Failed to get link")
+		return false
+	}
+	addresses, err := nlHandle.AddrList(link, netlink.FAMILY_ALL)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Error("haveAPIVIP: Failed to list addresses")
+		return false
+	}
+	nlVIP, err := netlink.ParseAddr("192.168.111.5/32")
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Error("haveAPIVIP: Failed to parse VIP")
+		return false
+	}
+	for _, address := range addresses {
+		if address.Equal(*nlVIP) {
+			return true
+		}
+	}
+	return false
+}
+
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
@@ -303,6 +459,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	}()
 
 	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh)
+	go haproxyHealthCheck(lbPort)
 
 	if os.Getenv("IS_BOOTSTRAP") == "yes" {
 		/* When OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP is set to true the bootstrap node won't be destroyed and
