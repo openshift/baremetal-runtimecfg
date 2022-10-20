@@ -210,6 +210,49 @@ type FoundAddress struct {
 	GatewayOnSubnet bool
 }
 
+// routeMapHasLinkIndex checks if the given linkIndex is part of the routeMap. This also accounts for routes
+// with multiple nexthops (multipath routes). For those, we require that all nexthops are on the same link, we do
+// not support nexthops out of multiple interfaces.
+func routeMapHasLinkIndex(routeMap map[int][]netlink.Route, linkIndex int) bool {
+	if routeMap[linkIndex] != nil {
+		return true
+	}
+	if routeMap[0] != nil {
+		for _, route := range routeMap[0] {
+			for _, nexthop := range route.MultiPath {
+				if nexthop.LinkIndex != linkIndex {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// gatewayIsOnIPSubnet will iterate over the routeMap and check if any gateway on interface linkIndex falls into
+// the range of ipnet. This will also run the same check for the multipath routes. We report true if at least one
+// gateway matches.
+func gatewayIsOnIPSubnet(ipnet net.IPNet, routeMap map[int][]netlink.Route, linkIndex int) bool {
+	if routeMap[linkIndex] != nil {
+		for _, route := range routeMap[linkIndex] {
+			if ipnet.Contains(route.Gw) {
+				return true
+			}
+		}
+	}
+	if routeMap[0] != nil {
+		for _, route := range routeMap[0] {
+			for _, nexthop := range route.MultiPath {
+				if nexthop.LinkIndex == linkIndex && ipnet.Contains(nexthop.Gw) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
@@ -224,7 +267,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	addrs := make([]FoundAddress, 0)
 	for link, addresses := range addrMap {
 		linkIndex := link.Attrs().Index
-		if routeMap[linkIndex] == nil {
+		if !routeMapHasLinkIndex(routeMap, linkIndex) {
 			continue
 		}
 		for _, address := range addresses {
@@ -234,7 +277,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 				Address:         address.IP,
 				Priority:        routeMap[linkIndex][0].Priority,
 				LinkIndex:       linkIndex,
-				GatewayOnSubnet: address.IPNet.Contains(routeMap[linkIndex][0].Gw),
+				GatewayOnSubnet: gatewayIsOnIPSubnet(*address.IPNet, routeMap, linkIndex),
 			})
 		}
 	}
