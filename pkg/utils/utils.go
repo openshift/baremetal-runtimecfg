@@ -7,12 +7,17 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+const kubeClientTimeout = 30 * time.Second
 
 var log = logrus.New()
 
@@ -114,4 +119,19 @@ func GetFileMd5(filePath string) (string, error) {
 	hashInBytes := hash.Sum(nil)[:16]
 	returnMD5String = hex.EncodeToString(hashInBytes)
 	return returnMD5String, nil
+}
+
+// getClientConfig returns a Kubernetes client Config.
+func GetClientConfig(kubeApiServerUrl, kubeconfigPath string) (*rest.Config, error) {
+	config, err := clientcmd.BuildConfigFromFlags(kubeApiServerUrl, kubeconfigPath)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"err": err,
+		}).Info("Failed to get client config")
+		return nil, err
+	}
+	// Kubeapi can be not stable on installation process
+	// and we should free connection in case it was stuck
+	config.Timeout = kubeClientTimeout
+	return config, err
 }

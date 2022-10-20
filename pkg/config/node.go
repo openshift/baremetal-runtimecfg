@@ -214,7 +214,7 @@ func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAdd
 func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
 	nodeCluster := make(map[string][]v1.Node)
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	config, err := utils.GetClientConfig("", kubeconfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -292,11 +292,10 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 }
 
 func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig IngressConfig, err error) {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	config, err := utils.GetClientConfig("", kubeconfigPath)
 	if err != nil {
 		return ingressConfig, err
 	}
-
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return ingressConfig, err
@@ -464,11 +463,8 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, apiVip net.
 	if readFromLocalAPI {
 		kubeApiServerUrl = localhostKubeApiServerUrl
 	}
-	config, err := clientcmd.BuildConfigFromFlags(kubeApiServerUrl, kubeconfigPath)
+	config, err := utils.GetClientConfig(kubeApiServerUrl, kubeconfigPath)
 	if err != nil {
-		log.WithFields(logrus.Fields{
-			"err": err,
-		}).Info("Failed to get client config")
 		return []Backend{}, err
 	}
 	clientset, err := kubernetes.NewForConfig(config)
@@ -557,7 +553,7 @@ func GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath string) (clusterN
 
 func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
 	// Get node list
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	config, err := utils.GetClientConfig("", kubeconfigPath)
 	if err != nil {
 		log.Errorf("Failed to build client config: %s", err)
 		return
