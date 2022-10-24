@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"net"
 	"sort"
 
@@ -219,12 +220,15 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRouteMap(routeMap); err != nil {
+		return nil, err
+	}
 
 	matches := make([]net.IP, 0)
 	addrs := make([]FoundAddress, 0)
 	for link, addresses := range addrMap {
 		linkIndex := link.Attrs().Index
-		if routeMap[linkIndex] == nil {
+		if !isLinkIndexInRouteMap(routeMap, linkIndex) {
 			continue
 		}
 		for _, address := range addresses {
@@ -232,9 +236,9 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 			// We should only have one default route per interface
 			addrs = append(addrs, FoundAddress{
 				Address:         address.IP,
-				Priority:        routeMap[linkIndex][0].Priority,
+				Priority:        getLinkRoutePriority(routeMap, linkIndex),
 				LinkIndex:       linkIndex,
-				GatewayOnSubnet: address.IPNet.Contains(routeMap[linkIndex][0].Gw),
+				GatewayOnSubnet: hasGatewayOnSubnet(routeMap, linkIndex, *address.IPNet),
 			})
 		}
 	}
@@ -258,7 +262,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 			}
 			return addrs[i].LinkIndex < addrs[j].LinkIndex
 		}
-		return addrs[i].Priority < addrs[j].Priority
+		return addrs[j].Priority == -1 || addrs[i].Priority != -1 && addrs[i].Priority < addrs[j].Priority
 	})
 
 	foundv4 := false
@@ -275,4 +279,91 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 		}
 	}
 	return matches, nil
+}
+
+// validateRouteMap checks the content of routemap and returns an error if anything looks problematic.
+// Currently, this only verifies if all multipath routes point out of the same interface.
+func validateRouteMap(routemap map[int][]netlink.Route) error {
+	if routes, ok := routemap[0]; ok {
+		var linkIndex int
+		for _, route := range routes {
+			for _, nexthop := range route.MultiPath {
+				if linkIndex != 0 && nexthop.LinkIndex != linkIndex {
+					return fmt.Errorf("multipath routes out of different interfaces are not supported. "+
+						"Got the following interfaces and routes: %v", routes)
+				}
+				linkIndex = nexthop.LinkIndex
+			}
+		}
+
+	}
+	return nil
+}
+
+// isLinkIndexInRouteMap will search for a given link index inside the provided routeMap and will return true in either
+// of the following scenarios:
+// a) The given index is a key of the routeMap but it is not 0.
+// b) The given index is container in any of the multipath routes' nexthops.
+// We deliberately exclude linkIndex 0 from the search. It is an invalid value as it points to the lo interface which
+// can not hold a default route; in the case of multipath routes, linkIndex 0 will exist though and hold the multipath
+// routes. Accepting it in a) would thus yield an invalid true.
+func isLinkIndexInRouteMap(routeMap map[int][]netlink.Route, linkIndex int) bool {
+	if linkIndex == 0 {
+		return false
+	}
+	if routes, ok := routeMap[linkIndex]; ok && routes != nil {
+		return true
+	}
+	routes, ok := routeMap[0]
+	if !ok {
+		return false
+	}
+	for _, v := range routes {
+		for _, nexthop := range v.MultiPath {
+			if nexthop.LinkIndex == linkIndex {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// getLinkRoutePriority returns the priority of the first route that can be found for the given interface or -1 if none
+// can be found. This will search normal routes and in multipath routes.
+func getLinkRoutePriority(routeMap map[int][]netlink.Route, linkIndex int) int {
+	if routes, ok := routeMap[linkIndex]; ok {
+		for _, route := range routes {
+			return route.Priority
+		}
+	}
+	if routes, ok := routeMap[0]; ok {
+		for _, route := range routes {
+			if route.MultiPath != nil {
+				return route.Priority
+			}
+		}
+	}
+	return -1
+}
+
+// hasGatewayOnSubnet will return true if any of the routes that match linkIndex (both normal routes and multipath)
+// has a gateway that falls into the provided CIDR.
+func hasGatewayOnSubnet(routeMap map[int][]netlink.Route, linkIndex int, cidr net.IPNet) bool {
+	if routes, ok := routeMap[linkIndex]; ok {
+		for _, route := range routes {
+			if cidr.Contains(route.Gw) {
+				return true
+			}
+		}
+	}
+	if routes, ok := routeMap[0]; ok {
+		for _, route := range routes {
+			for _, nexthop := range route.MultiPath {
+				if cidr.Contains(nexthop.Gw) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

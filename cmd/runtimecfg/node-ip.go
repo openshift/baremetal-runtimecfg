@@ -203,7 +203,7 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 				}
 				if err != nil {
 					if !retry {
-						return nil, fmt.Errorf("Failed to find node IP")
+						return nil, fmt.Errorf("Failed to find node IP, err: %q", err)
 					}
 					chosen = []net.IP{}
 					time.Sleep(time.Second)

@@ -46,6 +46,15 @@ func maybeAddAddress(addrMap map[netlink.Link][]netlink.Addr, af AddressFilter, 
 }
 
 func maybeAddRoute(routeMap map[int][]netlink.Route, rf RouteFilter, link netlink.Link, destination string, ra bool, priority int, gw string) {
+	maybeAddRouteHelper(routeMap, rf, link, destination, ra, priority, gw, nil)
+}
+
+func maybeAddMultiPathRoute(routeMap map[int][]netlink.Route, rf RouteFilter, ra bool, priority int, nexthops []*netlink.NexthopInfo) {
+	maybeAddRouteHelper(routeMap, rf, nil, "", ra, priority, "", nexthops)
+}
+
+func maybeAddRouteHelper(routeMap map[int][]netlink.Route, rf RouteFilter, link netlink.Link, destination string, ra bool,
+	priority int, gw string, nexthops []*netlink.NexthopInfo) {
 	var dst *net.IPNet
 	var err error
 	if destination != "" {
@@ -58,13 +67,17 @@ func maybeAddRoute(routeMap map[int][]netlink.Route, rf RouteFilter, link netlin
 	if ra {
 		prot = unix.RTPROT_RA
 	}
-	linkIndex := link.Attrs().Index
+	var linkIndex int
+	if len(nexthops) == 0 {
+		linkIndex = link.Attrs().Index
+	}
 	route := netlink.Route{
 		LinkIndex: linkIndex,
 		Dst:       dst,
 		Protocol:  prot,
 		Priority:  priority,
 		Gw:        net.ParseIP(gw),
+		MultiPath: nexthops,
 	}
 	if rf != nil && !rf(route) {
 		return
@@ -283,6 +296,60 @@ func multipleDefaultRouteMapSamePriority(rf RouteFilter) (map[int][]netlink.Rout
 	return routes, nil
 }
 
+func ipv6MultiHopRouteMapGlobal(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddMultiPathRoute(routes, rf, false, 100, []*netlink.NexthopInfo{
+		{
+			LinkIndex: eth0.Index,
+			Gw:        net.ParseIP("fe00::1"),
+		},
+		{
+			LinkIndex: eth0.Index,
+			Gw:        net.ParseIP("fe00::2"),
+		},
+	})
+	maybeAddRoute(routes, rf, eth0, "fd00::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fd02::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth1, "fd01::/64", false, 100, "")
+	return routes, nil
+}
+
+func ipv6MultiHopRouteMapLinkLocal(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddMultiPathRoute(routes, rf, false, 100, []*netlink.NexthopInfo{
+		{
+			LinkIndex: eth0.Index,
+			Gw:        net.ParseIP("fe80::e385:eff8:a422:f1e1"),
+		},
+		{
+			LinkIndex: eth0.Index,
+			Gw:        net.ParseIP("fe80::e385:eff8:a422:f1e2"),
+		},
+	})
+	maybeAddRoute(routes, rf, eth0, "fd00::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fd02::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth1, "fd01::/64", false, 100, "")
+	return routes, nil
+}
+
+func ipv6MultiHopRouteMapDifferentInterfaces(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddMultiPathRoute(routes, rf, false, 100, []*netlink.NexthopInfo{
+		{
+			LinkIndex: eth0.Index,
+			Gw:        net.ParseIP("fe80::e385:eff8:a422:f1e1"),
+		},
+		{
+			LinkIndex: eth1.Index,
+			Gw:        net.ParseIP("fe80::e385:eff8:a422:f1e2"),
+		},
+	})
+	maybeAddRoute(routes, rf, eth0, "fd00::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fd02::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth1, "fd01::/64", false, 100, "")
+	return routes, nil
+}
+
 var _ = Describe("addresses", func() {
 	It("matches an IPv4 VIP on the primary interface", func() {
 		addrs, err := addressesRoutingInternal(
@@ -436,6 +503,38 @@ var _ = Describe("addresses", func() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fe00::5")}))
+	})
+
+	It("prefers an IPv6 public unicast address over a private unicast address with multipath routing", func() {
+		addrs, err := addressesDefaultInternal(
+			true,
+			ValidNodeAddress,
+			ipv6AddrMapWithGlobalUnicast,
+			ipv6MultiHopRouteMapLinkLocal,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("2000::2")}))
+	})
+
+	It("prefers the IPv6 address that matches the default route gw with multipath routing", func() {
+		addrs, err := addressesDefaultInternal(
+			true,
+			ValidNodeAddress,
+			ipv6AddrMapWithGlobalUnicast,
+			ipv6MultiHopRouteMapGlobal,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fe00::5")}))
+	})
+
+	It("throws an error for multipath routing where the gateways are on different interfaces", func() {
+		_, err := addressesDefaultInternal(
+			true,
+			ValidNodeAddress,
+			ipv6AddrMapWithGlobalUnicast,
+			ipv6MultiHopRouteMapDifferentInterfaces,
+		)
+		Expect(err).To(HaveOccurred())
 	})
 
 	It("overlapping IPV6 subnets: matches an IPv6 VIP on the primary interface", func() {
