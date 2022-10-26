@@ -204,9 +204,10 @@ func AddressesDefault(preferIPv6 bool, af AddressFilter) ([]net.IP, error) {
 }
 
 type FoundAddress struct {
-	Address   net.IP
-	Priority  int
-	LinkIndex int
+	Address         net.IP
+	Priority        int
+	LinkIndex       int
+	GatewayOnSubnet bool
 }
 
 func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
@@ -230,20 +231,30 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 			log.Debugf("Address %s is on interface %s with default route", address, link.Attrs().Name)
 			// We should only have one default route per interface
 			addrs = append(addrs, FoundAddress{
-				Address:   address.IP,
-				Priority:  routeMap[linkIndex][0].Priority,
-				LinkIndex: linkIndex,
+				Address:         address.IP,
+				Priority:        routeMap[linkIndex][0].Priority,
+				LinkIndex:       linkIndex,
+				GatewayOnSubnet: address.IPNet.Contains(routeMap[linkIndex][0].Gw),
 			})
 		}
 	}
 
-	// Sort addresses into a stable order, based on default route priority and link
-	// index. Otherwise the order of the addresses we return may change if an address
-	// moves to a bridge (for example).
+	// Sort addresses into a stable order, based on:
+	// a) default route priority
+	// b) link
+	// c) IP address family
+	// d) The gateway being on the IP's CIDR
+	// e) The address being public
 	sort.SliceStable(addrs, func(i, j int) bool {
 		if addrs[i].Priority == addrs[j].Priority {
 			if addrs[i].LinkIndex == addrs[j].LinkIndex {
-				return IsIPv6(addrs[i].Address) == preferIPv6 && IsIPv6(addrs[j].Address) != preferIPv6
+				if IsIPv6(addrs[i].Address) == IsIPv6(addrs[j].Address) {
+					if addrs[i].GatewayOnSubnet == addrs[j].GatewayOnSubnet {
+						return !addrs[i].Address.IsPrivate()
+					}
+					return addrs[i].GatewayOnSubnet
+				}
+				return IsIPv6(addrs[i].Address) == preferIPv6
 			}
 			return addrs[i].LinkIndex < addrs[j].LinkIndex
 		}
