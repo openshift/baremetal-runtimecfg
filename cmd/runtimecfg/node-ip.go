@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	kubeletSvcOverridePath = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
-	nodeIpFile             = "/run/nodeip-configuration/primary-ip"
-	nodeIpIpV6File         = config.NodeIpIpV6File
-	nodeIpIpV4File         = config.NodeIpIpV4File
-	crioSvcOverridePath    = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
+	kubeletSvcOverridePath   = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
+	nodeIpFile               = "/run/nodeip-configuration/primary-ip"
+	nodeIpIpV6File           = config.NodeIpIpV6File
+	nodeIpIpV4File           = config.NodeIpIpV4File
+	nodeIpNotMatchesVipsFile = "/run/nodeip-configuration/remote-worker"
+	crioSvcOverridePath      = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
+	remoteWorkerLabel        = "node.openshift.io/remote-worker"
 )
 
 var retry, preferIPv6 bool
@@ -73,7 +75,7 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, err := getSuitableIPs(retry, vips, preferIPv6)
+	chosenAddresses, _, err := getSuitableIPs(retry, vips, preferIPv6)
 	if err != nil {
 		return err
 	}
@@ -96,7 +98,7 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, err := getSuitableIPs(retry, vips, preferIPv6)
+	chosenAddresses, matchesVips, err := getSuitableIPs(retry, vips, preferIPv6)
 	if err != nil {
 		return err
 	}
@@ -107,8 +109,25 @@ func set(cmd *cobra.Command, args []string) error {
 	if len(chosenAddresses) > 1 {
 		nodeIPs += "," + chosenAddresses[1].String()
 	}
+	remoteWorker := false
+	// if chosen ip doesn't match vips need create a file that
+	// this file will be used by keepalived container to verify if it should run or not
+	// We want to disable keepalive in case this host is remote worker
+	if len(vips) > 0 && !matchesVips {
+		err = writeToFile(nodeIpNotMatchesVipsFile, "node ip doesn't match any vip, don't run keepalived")
+		if err != nil {
+			return err
+		}
+		remoteWorker = true
+	}
+
 	// Kubelet
 	kOverrideContent := fmt.Sprintf("[Service]\nEnvironment=\"KUBELET_NODE_IP=%s\" \"KUBELET_NODE_IPS=%s\"\n", nodeIP, nodeIPs)
+	// in case chosen ip doesn't match vip (remote worker) set kubelet label
+	if remoteWorker {
+		kOverrideContent += fmt.Sprintf("Environment=\"CUSTOM_KUBELET_LABELS=%s\"\n", remoteWorkerLabel)
+	}
+
 	log.Infof("Writing Kubelet service override with content %s", kOverrideContent)
 	err = writeToFile(kubeletSvcOverridePath, kOverrideContent)
 	if err != nil {
@@ -183,7 +202,7 @@ func checkAddressUsable(chosen []net.IP) (err error) {
 	return err
 }
 
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, err error) {
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, matchesVips bool, err error) {
 	// Enable debug logging in utils package
 	utils.SetDebugLogLevel()
 	for {
@@ -195,12 +214,12 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 				}
 				if err != nil {
 					if !retry {
-						return nil, fmt.Errorf("Failed to find node IP")
+						return nil, false, fmt.Errorf("Failed to find node IP")
 					}
 					time.Sleep(time.Second)
 					continue
 				}
-				return chosen, err
+				return chosen, true, err
 			}
 		}
 		if len(chosen) == 0 {
@@ -211,17 +230,17 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 				}
 				if err != nil {
 					if !retry {
-						return nil, fmt.Errorf("Failed to find node IP")
+						return nil, false, fmt.Errorf("Failed to find node IP")
 					}
 					chosen = []net.IP{}
 					time.Sleep(time.Second)
 					continue
 				}
-				return chosen, err
+				return chosen, false, err
 			}
 		}
 		if !retry {
-			return nil, fmt.Errorf("Failed to find node IP")
+			return nil, false, fmt.Errorf("Failed to find node IP")
 		}
 
 		log.Errorf("Failed to find a suitable node IP")
