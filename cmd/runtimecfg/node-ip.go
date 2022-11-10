@@ -21,6 +21,7 @@ const (
 	nodeIpFile             = "/run/nodeip-configuration/primary-ip"
 	nodeIpIpV6File         = config.NodeIpIpV6File
 	nodeIpIpV4File         = config.NodeIpIpV4File
+	nodeIpMatchesVipsFile  = "/run/nodeip-configuration/notMatchesVips"
 	crioSvcOverridePath    = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
 )
 
@@ -73,7 +74,7 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, err := getSuitableIPs(retry, vips, preferIPv6)
+	chosenAddresses, _, err := getSuitableIPs(retry, vips, preferIPv6)
 	if err != nil {
 		return err
 	}
@@ -96,7 +97,7 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, err := getSuitableIPs(retry, vips, preferIPv6)
+	chosenAddresses, matchesVips, err := getSuitableIPs(retry, vips, preferIPv6)
 	if err != nil {
 		return err
 	}
@@ -146,6 +147,15 @@ func set(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// if chosen ip matches vips add file that says it
+	// this file will be used by keepalived container if it needs to be running or not
+	if len(vips) > 0 && !matchesVips {
+		err = writeToFile(nodeIpMatchesVipsFile, "node ip doesn't match any vip, don't run keepalived")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -183,7 +193,7 @@ func checkAddressUsable(chosen []net.IP) (err error) {
 	return err
 }
 
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, err error) {
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, matchesVips bool, err error) {
 	// Enable debug logging in utils package
 	utils.SetDebugLogLevel()
 	for {
@@ -195,12 +205,12 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 				}
 				if err != nil {
 					if !retry {
-						return nil, fmt.Errorf("Failed to find node IP")
+						return nil, false, fmt.Errorf("Failed to find node IP")
 					}
 					time.Sleep(time.Second)
 					continue
 				}
-				return chosen, err
+				return chosen, true, err
 			}
 		}
 		if len(chosen) == 0 {
@@ -211,17 +221,17 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 				}
 				if err != nil {
 					if !retry {
-						return nil, fmt.Errorf("Failed to find node IP")
+						return nil, false, fmt.Errorf("Failed to find node IP")
 					}
 					chosen = []net.IP{}
 					time.Sleep(time.Second)
 					continue
 				}
-				return chosen, err
+				return chosen, false, err
 			}
 		}
 		if !retry {
-			return nil, fmt.Errorf("Failed to find node IP")
+			return nil, false, fmt.Errorf("Failed to find node IP")
 		}
 
 		log.Errorf("Failed to find a suitable node IP")
