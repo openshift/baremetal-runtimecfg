@@ -1,8 +1,15 @@
 package monitor
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"io/ioutil"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +24,7 @@ import (
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 	"github.com/sirupsen/logrus"
+	"github.com/thedevsaddam/retry"
 )
 
 const (
@@ -282,7 +290,78 @@ func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
 	return nil
 }
 
+func isRemoteWorker() bool {
+	_, err := os.Stat("/run/nodeip-configuration/notMatchesVips")
+	return err == nil
+}
+
+func setRemoteWorkerLabel(kubeconfigPath string) error {
+
+	nodeIp, err := config.GetIpFromFile("/run/nodeip-configuration/primary-ip")
+	if err != nil {
+		log.WithError(err).Infof("Failed to get ip from primary ip file")
+		return err
+	}
+
+	cConfig, err := utils.GetClientConfig("", kubeconfigPath)
+	if err != nil {
+		log.WithError(err).Warnf("Failed to get client config")
+		return err
+	}
+	clientset, err := kubernetes.NewForConfig(cConfig)
+	if err != nil {
+		log.WithError(err).Info("Failed to get client")
+		return err
+	}
+	var currentNode v1.Node
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		log.WithError(err).Warnf("Failed to get nodes")
+	}
+	for _, node := range nodes.Items {
+		for _, ip := range node.Status.Addresses {
+			if ip.Type == v1.NodeInternalIP && ip.Address == nodeIp.String() {
+				currentNode = node
+				break
+			}
+		}
+	}
+	_, ok := currentNode.Labels["node-role.kubernetes.io/remote-worker"]
+	if ok {
+		log.Infof("Remote worker label was already set")
+		return nil
+	}
+
+	nodeLabelsString, _ := json.Marshal(map[string]string{"node-role.kubernetes.io/remote-worker": ""})
+	log.Infof("Setting remote worker label")
+	err = patchNodeLabels(clientset, currentNode.Name, string(nodeLabelsString))
+	if err != nil {
+		log.WithError(err).Warnf("Failed to set remote worker label")
+		return err
+	}
+	return nil
+}
+
+func patchNodeLabels(client *kubernetes.Clientset, nodeName string, nodeLabels string) error {
+	data := []byte(`{"metadata": {"labels": ` + nodeLabels + `}}`)
+	_, err :=client.CoreV1().Nodes().Patch(context.Background(), nodeName, types.MergePatchType, data, metav1.PatchOptions{})
+	return err
+}
+
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration) error {
+
+	if isRemoteWorker() {
+		log.Infof("Remote worker mode, setting remote node label")
+		_, err := retry.Do(100, 1 * time.Second, setRemoteWorkerLabel, kubeconfigPath)
+		if err == nil {
+			log.Infof("Remote worker mode, going to sleep forever")
+			// Sleep forever
+			<-make(chan int)
+		}
+		return err
+	}
+
+
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
