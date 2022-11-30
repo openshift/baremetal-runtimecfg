@@ -6,5 +6,7 @@ approvers:
   - creydr
   - cybertron
   - dougsland
+  - mandre
+  - tsorya
 component: Networking
 subcomponent: runtime-cfg
