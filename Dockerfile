@@ -4,7 +4,7 @@ COPY . .
 RUN mkdir build
 RUN GO111MODULE=on go build --mod=vendor -o build ./cmd/...
 
-FROM centos:stream8
+FROM centos:stream9
 
 RUN yum install -y dhcp-client diffutils && yum clean all
 
