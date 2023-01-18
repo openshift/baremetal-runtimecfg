@@ -98,6 +98,7 @@ func addIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
 	maybeAddAddress(addrs, af, lo, "::1/128", false)
 	maybeAddAddress(addrs, af, eth0, "fd00::5/64", false)
 	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false)
+	maybeAddAddress(addrs, af, eth1, "fd69::2/125", false)
 	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true)
 	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true)
 	maybeAddAddress(addrs, af, eth1, "fd01::5/64", false)
@@ -108,6 +109,15 @@ func addIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
 	maybeAddRoute(routes, rf, eth0, "fd00::/64", false, 100, "")
 	maybeAddRoute(routes, rf, eth0, "fd02::/64", false, 100, "")
 	maybeAddRoute(routes, rf, eth1, "fd01::/64", false, 100, "")
+}
+
+func addIPv6AddrsOVN(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
+	maybeAddAddress(addrs, af, eth0, "fd69::2/125", false)
+}
+
+func addIPv6RoutesWithOVN(routes map[int][]netlink.Route, rf RouteFilter) {
+	maybeAddRoute(routes, rf, eth0, "", false, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fd69::/64", false, 48, "")
 }
 
 func addOverlappingIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
@@ -187,6 +197,17 @@ func ipv6AddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
 	addrs := make(map[netlink.Link][]netlink.Addr)
 	addIPv6Addrs(addrs, af)
 	return addrs, nil
+}
+
+func ipv6AddrMapOVN(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
+	addrs := make(map[netlink.Link][]netlink.Addr)
+	addIPv6AddrsOVN(addrs, af)
+	return addrs, nil
+}
+func ipv6RouteMapOVN(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	addIPv6RoutesWithOVN(routes, rf)
+	return routes, nil
 }
 
 func ipv6RouteMap(rf RouteFilter) (map[int][]netlink.Route, error) {
@@ -392,6 +413,30 @@ var _ = Describe("addresses", func() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::5")}))
+	})
+
+	It("finds an interface with a default route in ovn in an IPv6 cluster", func() {
+
+		By("Verify ovn ip will be chosen without filter")
+		addrs, err := addressesDefaultInternal(
+			true,
+			ValidNodeAddress,
+			ipv6AddrMapOVN,
+			ipv6RouteMapOVN,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd69::2")}))
+
+		By("Verify ovn ip will not be chosen with filter")
+		addrs, err = addressesDefaultInternal(
+			true,
+			ValidOVNNodeAddress,
+			ipv6AddrMapOVN,
+			ipv6RouteMapOVN,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{}))
+
 	})
 
 	It("finds an interface with a default route in a dual-stack cluster", func() {

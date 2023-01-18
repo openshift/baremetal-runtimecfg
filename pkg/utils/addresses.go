@@ -100,6 +100,16 @@ func ValidNodeAddress(address netlink.Addr) bool {
 	return true
 }
 
+// ValidOVNNodeAddress returns true if the address is suitable for a node's primary IP
+// and is not fd69::2
+// we intentionally don't filter ipv4 because it isn't necessary.
+func ValidOVNNodeAddress(address netlink.Addr) bool {
+	if IsIPv6(address.IP) && address.IP.String() == "fd69::2" {
+		return false
+	}
+	return ValidNodeAddress(address)
+}
+
 // usableIPv6Route returns true if the passed route is acceptable for AddressesRouting
 func usableIPv6Route(route netlink.Route) bool {
 	// Ignore default routes

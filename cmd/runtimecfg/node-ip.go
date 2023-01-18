@@ -24,9 +24,11 @@ const (
 	nodeIpNotMatchesVipsFile = "/run/nodeip-configuration/remote-worker"
 	crioSvcOverridePath      = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
 	remoteWorkerLabel        = "node.openshift.io/remote-worker"
+	ovn                      = "OVNKubernetes"
 )
 
 var retry, preferIPv6 bool
+var networkType string
 var nodeIPCmd = &cobra.Command{
 	Use:                   "node-ip",
 	DisableFlagsInUseLine: true,
@@ -66,6 +68,7 @@ func init() {
 	nodeIPCmd.AddCommand(nodeIPSetCmd)
 	nodeIPCmd.PersistentFlags().BoolVarP(&retry, "retry-on-failure", "r", false, "Keep retrying until it finds a suitable IP address. System errors will still abort")
 	nodeIPCmd.PersistentFlags().BoolVarP(&preferIPv6, "prefer-ipv6", "6", false, "Prefer IPv6 addresses to IPv4")
+	nodeIPCmd.PersistentFlags().StringVarP(&networkType, "network-type", "n", ovn, "CNI network type")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
@@ -75,7 +78,7 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, _, err := getSuitableIPs(retry, vips, preferIPv6)
+	chosenAddresses, _, err := getSuitableIPs(retry, vips, preferIPv6, networkType)
 	if err != nil {
 		return err
 	}
@@ -98,7 +101,7 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, matchesVips, err := getSuitableIPs(retry, vips, preferIPv6)
+	chosenAddresses, matchesVips, err := getSuitableIPs(retry, vips, preferIPv6, networkType)
 	if err != nil {
 		return err
 	}
@@ -202,12 +205,13 @@ func checkAddressUsable(chosen []net.IP) (err error) {
 	return err
 }
 
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP, matchesVips bool, err error) {
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string) (chosen []net.IP, matchesVips bool, err error) {
 	// Enable debug logging in utils package
 	utils.SetDebugLogLevel()
+	ipFilterFunc := utils.ValidNodeAddress
 	for {
 		if len(vips) > 0 {
-			chosen, err = utils.AddressesRouting(vips, utils.ValidNodeAddress)
+			chosen, err = utils.AddressesRouting(vips, ipFilterFunc)
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = checkAddressUsable(chosen)
@@ -223,7 +227,11 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool) (chosen []net.IP
 			}
 		}
 		if len(chosen) == 0 {
-			chosen, err = utils.AddressesDefault(preferIPv6, utils.ValidNodeAddress)
+			// we should check ovn specific in case vips were not set
+			if networkType == ovn {
+				ipFilterFunc = utils.ValidOVNNodeAddress
+			}
+			chosen, err = utils.AddressesDefault(preferIPv6, ipFilterFunc)
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = checkAddressUsable(chosen)
