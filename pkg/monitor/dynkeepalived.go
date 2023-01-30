@@ -64,23 +64,23 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) {
 	if !newConfig.EnableUnicast {
 		return
 	}
-	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, newConfig.Cluster.APIVIP)
+	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{newConfig.Cluster.APIVIP, newConfig.Cluster.IngressVIP})
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
 	}
 
-	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(newConfig.Cluster.APIVIP))
+	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(newConfig.Cluster.APIVIP), net.ParseIP(newConfig.Cluster.IngressVIP)})
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
 	}
 
 	for i, c := range *newConfig.Configs {
 		// Must do this by index instead of using c because c is local to this loop
-		(*newConfig.Configs)[i].IngressConfig, err = config.GetIngressConfig(kubeconfigPath, c.Cluster.APIVIP)
+		(*newConfig.Configs)[i].IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{c.Cluster.APIVIP, c.Cluster.IngressVIP})
 		if err != nil {
 			log.Warnf("Could not retrieve ingress config: %v", err)
 		}
-		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(c.Cluster.APIVIP))
+		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(c.Cluster.APIVIP), net.ParseIP(c.Cluster.IngressVIP)})
 		if err != nil {
 			log.Warnf("Could not retrieve LB config: %v", err)
 		}
@@ -147,7 +147,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	first that it's operational. */
 	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
 	for start := time.Now(); time.Since(start) < time.Second*30; {
-		if _, err := config.GetIngressConfig(kubeconfigPath, ""); err == nil {
+		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}); err == nil {
 			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
 			break
 		}
@@ -156,7 +156,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	}
 
 	for {
-		if _, err := config.GetIngressConfig(kubeconfigPath, ""); err != nil {
+		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}); err != nil {
 			// We have started to talk to Ironic through the API VIP as well,
 			// so if Ironic is still up then we need to keep the VIP, even if
 			// the apiserver has gone down.
