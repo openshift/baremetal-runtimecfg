@@ -17,14 +17,16 @@ import (
 )
 
 const (
-	kubeletSvcOverridePath   = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
-	nodeIpFile               = "/run/nodeip-configuration/primary-ip"
-	nodeIpIpV6File           = config.NodeIpIpV6File
-	nodeIpIpV4File           = config.NodeIpIpV4File
-	nodeIpNotMatchesVipsFile = "/run/nodeip-configuration/remote-worker"
-	crioSvcOverridePath      = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
-	remoteWorkerLabel        = "node.openshift.io/remote-worker"
-	ovn                      = "OVNKubernetes"
+	kubeletSvcOverridePath      = "/etc/systemd/system/kubelet.service.d/20-nodenet.conf"
+	nodeIpFile                  = "/run/nodeip-configuration/primary-ip"
+	nodeIpIpV6File              = config.NodeIpIpV6File
+	nodeIpIpV4File              = config.NodeIpIpV4File
+	nodeIpNotMatchesVipsFile    = "/run/nodeip-configuration/remote-worker"
+	crioSvcOverridePath         = "/etc/systemd/system/crio.service.d/20-nodenet.conf"
+	remoteWorkerLabel           = "node.openshift.io/remote-worker"
+	ovn                         = "OVNKubernetes"
+	maxSecondsToSuitableIPsLoop = 300 // 5 minutes
+	addSecondsToSuitableIPsLoop = 2
 )
 
 var retry, preferIPv6 bool
@@ -206,10 +208,15 @@ func checkAddressUsable(chosen []net.IP) (err error) {
 }
 
 func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string) (chosen []net.IP, matchesVips bool, err error) {
+	// timerLoop will hold a time in Seconds to be used with time.Sleep() before going
+	// for the next loop interation.
+	timerLoop := 1
+
 	// Enable debug logging in utils package
 	utils.SetDebugLogLevel()
 	ipFilterFunc := utils.ValidNodeAddress
 	for {
+		timerLoop = timerLoop * addSecondsToSuitableIPsLoop
 		if len(vips) > 0 {
 			chosen, err = utils.AddressesRouting(vips, ipFilterFunc)
 			if len(chosen) > 0 || err != nil {
@@ -252,7 +259,12 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 		}
 
 		log.Errorf("Failed to find a suitable node IP")
-		time.Sleep(time.Second)
+		if timerLoop >= maxSecondsToSuitableIPsLoop {
+			// we reached the max seconds to suitable IPs, to avoid spam logs
+			// keep sleeping maxSecondsToSuitableIPsLoop before the next try.
+			timerLoop = maxSecondsToSuitableIPsLoop
+		}
+		time.Sleep(time.Second * time.Duration(timerLoop))
 	}
 }
 
