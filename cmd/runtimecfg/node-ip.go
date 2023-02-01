@@ -27,7 +27,7 @@ const (
 	ovn                      = "OVNKubernetes"
 )
 
-var retry, preferIPv6 bool
+var retry, preferIPv6, userManagedLB bool
 var networkType string
 var nodeIPCmd = &cobra.Command{
 	Use:                   "node-ip",
@@ -69,6 +69,7 @@ func init() {
 	nodeIPCmd.PersistentFlags().BoolVarP(&retry, "retry-on-failure", "r", false, "Keep retrying until it finds a suitable IP address. System errors will still abort")
 	nodeIPCmd.PersistentFlags().BoolVarP(&preferIPv6, "prefer-ipv6", "6", false, "Prefer IPv6 addresses to IPv4")
 	nodeIPCmd.PersistentFlags().StringVarP(&networkType, "network-type", "n", ovn, "CNI network type")
+	nodeIPShowCmd.Flags().BoolVarP(&userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
@@ -113,10 +114,11 @@ func set(cmd *cobra.Command, args []string) error {
 		nodeIPs += "," + chosenAddresses[1].String()
 	}
 	remoteWorker := false
-	// if chosen ip doesn't match vips need create a file that
-	// this file will be used by keepalived container to verify if it should run or not
-	// We want to disable keepalive in case this host is remote worker
-	if len(vips) > 0 && !matchesVips {
+	// if chosen ip doesn't match vips, we need create a file that
+	// will be used by keepalived container to verify if it should run or not
+	// We want to disable keepalived in case this host is remote worker
+	// This is skipped in case of user managed load balancer as the VIPs are not managed by keepalived.
+	if len(vips) > 0 && !matchesVips && !userManagedLB {
 		err = writeToFile(nodeIpNotMatchesVipsFile, "node ip doesn't match any vip, don't run keepalived")
 		if err != nil {
 			return err
