@@ -69,7 +69,7 @@ func init() {
 	nodeIPCmd.PersistentFlags().BoolVarP(&retry, "retry-on-failure", "r", false, "Keep retrying until it finds a suitable IP address. System errors will still abort")
 	nodeIPCmd.PersistentFlags().BoolVarP(&preferIPv6, "prefer-ipv6", "6", false, "Prefer IPv6 addresses to IPv4")
 	nodeIPCmd.PersistentFlags().StringVarP(&networkType, "network-type", "n", ovn, "CNI network type")
-	nodeIPShowCmd.Flags().BoolVarP(&userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
+	nodeIPCmd.PersistentFlags().BoolVarP(&userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
