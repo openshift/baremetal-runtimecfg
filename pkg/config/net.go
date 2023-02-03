@@ -83,7 +83,7 @@ func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAdd
 					// the candidate address and VIP address are L2 connected.
 					// To make sure that the correct interface being chosen for cases like:
 					// 2 interfaces , subnetA: 1001:db8::/120 , subnetB: 1001:db8::f00/120 and VIP address  1001:db8::64
-					nodeAddrs, err := utils.AddressesRouting(vips, utils.ValidNodeAddress)
+					nodeAddrs, err := utils.AddressesRouting(vips, utils.ValidNodeAddress, utils.IsIPv6(vips[0]))
 					if err == nil && len(nodeAddrs) > 0 && n.IP.Equal(nodeAddrs[0]) {
 						return iface, n, nil
 					}

@@ -311,6 +311,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
@@ -322,6 +323,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("192.168.1.2")}))
@@ -333,6 +335,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			ipv4AddrMap,
 			ipv4RouteMapDefaultEth1,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
@@ -344,6 +347,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			ipv6AddrMap,
 			ipv6RouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::5")}))
@@ -355,6 +359,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			ipv6AddrMap,
 			ipv6RouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd01::5")}))
@@ -366,6 +371,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			dualStackAddrMap,
 			dualStackRouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}))
@@ -377,6 +383,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			dualStackAddrMap,
 			dualStackRouteMap,
+			true,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd01::5"), net.ParseIP("192.168.1.2")}))
@@ -489,6 +496,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			overlappingIpv6AddrMap,
 			overlappingIpv6RouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::f05")}))
@@ -500,6 +508,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			overlappingIpv6AddrMap,
 			overlappingIpv6RouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::5")}))
@@ -511,6 +520,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			overlappingDualStackAddrMap,
 			overlappingDualStackRouteMap,
+			false,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::f05")}))
@@ -522,6 +532,7 @@ var _ = Describe("addresses", func() {
 			ValidNodeAddress,
 			overlappingDualStackAddrMap,
 			overlappingDualStackRouteMap,
+			true,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00::5"), net.ParseIP("192.168.1.2")}))

@@ -133,11 +133,11 @@ func IsIPv6(ip net.IP) bool {
 }
 
 // AddressesRouting takes a slice of Virtual IPs and returns a configured address in the current network namespace that directly routes to at least one of those vips. If the interface containing that address is dual-stack, it will also return a single address of the opposite IP family. You can optionally pass an AddressFilter to further filter down which addresses are considered
-func AddressesRouting(vips []net.IP, af AddressFilter) ([]net.IP, error) {
-	return addressesRoutingInternal(vips, af, getAddrs, getRouteMap)
+func AddressesRouting(vips []net.IP, af AddressFilter, preferIPv6 bool) ([]net.IP, error) {
+	return addressesRoutingInternal(vips, af, getAddrs, getRouteMap, preferIPv6)
 }
 
-func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc) ([]net.IP, error) {
+func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressMapFunc, getRouteMap routeMapFunc, preferIPv6 bool) ([]net.IP, error) {
 	addrMap, err := getAddrs(af)
 	if err != nil {
 		return nil, err
@@ -203,6 +203,11 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 			break
 		}
 	}
+	// Ensure we return addresses in the desired order
+	sort.SliceStable(matches, func(i, j int) bool {
+		// Very simplified since we only ever have two items in this list
+		return IsIPv6(matches[i]) == preferIPv6
+	})
 	return matches, nil
 }
 
