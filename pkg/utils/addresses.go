@@ -128,10 +128,6 @@ func usableIPv6Route(route netlink.Route) bool {
 	return true
 }
 
-func IsIPv6(ip net.IP) bool {
-	return ip.To4() == nil
-}
-
 // AddressesRouting takes a slice of Virtual IPs and returns a configured address in the current network namespace that directly routes to at least one of those vips. If the interface containing that address is dual-stack, it will also return a single address of the opposite IP family. You can optionally pass an AddressFilter to further filter down which addresses are considered
 func AddressesRouting(vips []net.IP, af AddressFilter) ([]net.IP, error) {
 	return addressesRoutingInternal(vips, af, getAddrs, getRouteMap)
@@ -290,7 +286,13 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	return matches, nil
 }
 
-func GetInterfaceWithCidrByIP(ip net.IP) (*net.Interface, *net.IPNet, error) {
+// GetInterfaceWithCidrByIP returns the interface and network that has the passed IP address
+// configured. It allows to run in a non-strict mode in which it's not required to match the
+// exact IP address but only a subnet.
+//
+// E.g. for interface configured as "192.168.1.1/24" strict mode asked about "192.168.1.2" returns
+// FALSE whereas in non-strict mode it returns TRUE.
+func GetInterfaceWithCidrByIP(ip net.IP, strictMatch bool) (*net.Interface, *net.IPNet, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, nil, err
@@ -304,12 +306,18 @@ func GetInterfaceWithCidrByIP(ip net.IP) (*net.Interface, *net.IPNet, error) {
 		for _, addr := range addrs {
 			switch n := addr.(type) {
 			case *net.IPNet:
-				ifaceIp, _, err := net.ParseCIDR(strings.Replace(addr.String(), "/128", "/64", 1))
+				addrOffset := strings.Replace(addr.String(), "/128", "/64", 1)
+				ifaceIp, _, err := net.ParseCIDR(addrOffset)
 				if err == nil {
 					if ifaceIp.Equal(ip) {
 						return &iface, n, nil
 					}
-
+					if !strictMatch {
+						match, _ := IpInCidr(ip.String(), addrOffset)
+						if match {
+							return &iface, n, nil
+						}
+					}
 				}
 			default:
 				fmt.Println("not supported addr")
