@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	// Enable sha256 in container image references
@@ -27,8 +28,6 @@ const (
 	ovn                      = "OVNKubernetes"
 )
 
-var retry, preferIPv6, userManagedLB bool
-var networkType string
 var nodeIPCmd = &cobra.Command{
 	Use:                   "node-ip",
 	DisableFlagsInUseLine: true,
@@ -62,14 +61,23 @@ var nodeIPSetCmd = &cobra.Command{
 	},
 }
 
+var params struct {
+	retry         bool
+	preferIPv6    bool
+	userManagedLB bool
+	networkType   string
+	platform      string
+}
+
 // init executes upon import
 func init() {
 	nodeIPCmd.AddCommand(nodeIPShowCmd)
 	nodeIPCmd.AddCommand(nodeIPSetCmd)
-	nodeIPCmd.PersistentFlags().BoolVarP(&retry, "retry-on-failure", "r", false, "Keep retrying until it finds a suitable IP address. System errors will still abort")
-	nodeIPCmd.PersistentFlags().BoolVarP(&preferIPv6, "prefer-ipv6", "6", false, "Prefer IPv6 addresses to IPv4")
-	nodeIPCmd.PersistentFlags().StringVarP(&networkType, "network-type", "n", ovn, "CNI network type")
-	nodeIPCmd.PersistentFlags().BoolVarP(&userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
+	nodeIPCmd.PersistentFlags().BoolVarP(&params.retry, "retry-on-failure", "r", false, "Keep retrying until it finds a suitable IP address. System errors will still abort")
+	nodeIPCmd.PersistentFlags().BoolVarP(&params.preferIPv6, "prefer-ipv6", "6", false, "Prefer IPv6 addresses to IPv4")
+	nodeIPCmd.PersistentFlags().StringVarP(&params.networkType, "network-type", "n", ovn, "CNI network type")
+	nodeIPCmd.PersistentFlags().BoolVarP(&params.userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
+	nodeIPCmd.PersistentFlags().StringVarP(&params.platform, "platform", "p", "", "Cluster platform")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
@@ -79,7 +87,7 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, _, err := getSuitableIPs(retry, vips, preferIPv6, networkType)
+	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType)
 	if err != nil {
 		return err
 	}
@@ -90,6 +98,8 @@ func show(cmd *cobra.Command, args []string) error {
 }
 
 func set(cmd *cobra.Command, args []string) error {
+	log.Infof("NodeIp started with params: %+v", params)
+
 	// If primary ip address was already created, it means that nodeip-configuration has run already and no need to
 	// choose new ip, we should leave same configuration as we already set
 	if ip, err := config.GetIpFromFile(nodeIpFile); err == nil {
@@ -102,7 +112,7 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, matchesVips, err := getSuitableIPs(retry, vips, preferIPv6, networkType)
+	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType)
 	if err != nil {
 		return err
 	}
@@ -113,17 +123,16 @@ func set(cmd *cobra.Command, args []string) error {
 	if len(chosenAddresses) > 1 {
 		nodeIPs += "," + chosenAddresses[1].String()
 	}
-	remoteWorker := false
+	remoteWorker := isRemoteWorker(vips, matchesVips, params.userManagedLB, params.platform)
 	// if chosen ip doesn't match vips, we need create a file that
 	// will be used by keepalived container to verify if it should run or not
 	// We want to disable keepalived in case this host is remote worker
 	// This is skipped in case of user managed load balancer as the VIPs are not managed by keepalived.
-	if len(vips) > 0 && !matchesVips && !userManagedLB {
+	if remoteWorker {
 		err = writeToFile(nodeIpNotMatchesVipsFile, "node ip doesn't match any vip, don't run keepalived")
 		if err != nil {
 			return err
 		}
-		remoteWorker = true
 	}
 
 	// Kubelet
@@ -268,4 +277,9 @@ func parseIPs(args []string) ([]net.IP, error) {
 		log.Infof("Parsed Virtual IP %s", ips[i])
 	}
 	return ips, nil
+}
+
+// currently we allow setting remote worker only in case of baremetal platform without external lb
+func isRemoteWorker(vips []net.IP, matchesVips, userManagedLB bool, platform string) bool {
+	return len(vips) > 0 && !matchesVips && !userManagedLB && strings.ToLower(platform) == "baremetal"
 }
