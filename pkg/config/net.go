@@ -41,7 +41,7 @@ func getInterfaceAndNonVIPAddrFromFile(vip net.IP) (*net.Interface, *net.IPNet, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return utils.GetInterfaceWithCidrByIP(ip)
+	return utils.GetInterfaceWithCidrByIP(ip, true)
 }
 
 // NOTE(bnemec): All addresses in the vips array must be the same ip version
