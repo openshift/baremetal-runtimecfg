@@ -229,7 +229,7 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 	for {
 		timerLoop = timerLoop * addSecondsToSuitableIPsLoop
 		if len(vips) > 0 {
-			chosen, err = utils.AddressesRouting(vips, ipFilterFunc)
+			chosen, err = utils.AddressesRouting(vips, ipFilterFunc, preferIPv6)
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = checkAddressUsable(chosen)
