@@ -43,6 +43,93 @@ var _ = Describe("IP stack detection", func() {
 			res := IsIPv6(net.ParseIP("this-is-not-an-ip"))
 			Expect(res).To(Equal(false))
 		})
+
+	})
+
+	Context("for IPv4-mapped-to-IPv6 addresses", func() {
+		// (mko) This test suite is intentionally returning wrong results. This is because the
+		// mapped form of those addresses is making them impossible to distinguish without
+		// knowing more properties of the link.
+		//
+		// Due to the fact how net.IPv4() initialization is implemented and the fact that it
+		// always adds the v4InV6Prefix header in a binary form, those addresses look like IPv4
+		// and in most cases behave like such.
+		//
+		// The tests here are saying that "::ffff:192.168.0.14" is IPv4 and not an IPv6 address
+		// whenever fed into our own IsIPv4 and IsIPv6 functions. For a proper answer returning
+		// IPv6 for those, we have IsNetIPv6 function which looks at IP address as well as subnet
+		// mask.
+
+		It("IsIPv4 returns true for IPv4-mapped-to-IPv6 address", func() {
+			res := IsIPv4(net.ParseIP("::ffff:192.168.0.14"))
+			Expect(res).To(Equal(true))
+		})
+		It("IsIPv4 returns true for binary IPv4-mapped-to-IPv6 address", func() {
+			ip := net.IP([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 192, 168, 1, 160})
+			res := IsIPv4(ip)
+			Expect(res).To(Equal(true))
+		})
+
+		It("IsIPv6 returns false for IPv4-mapped-to-IPv6 address", func() {
+			res := IsIPv6(net.ParseIP("::ffff:192.168.0.14"))
+			Expect(res).To(Equal(false))
+		})
+		It("IsIPv6 returns true for binary IPv4-mapped-to-IPv6 address", func() {
+			ip := net.IP([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 192, 168, 1, 160})
+			res := IsIPv6(ip)
+			Expect(res).To(Equal(false))
+		})
+	})
+
+	Context("using IsNetIPv6", func() {
+		It("returns false for IPv4 addresses", func() {
+			addrs := []string{
+				"192.168.0.1/24",
+				"192.168.0.1/32",
+				"192.168.0.1/0",
+				"0.0.0.0/0",
+			}
+			for _, addr := range addrs {
+				_, addr, _ := net.ParseCIDR(addr)
+				res := IsNetIPv6(*addr)
+				Expect(res).To(Equal(false))
+			}
+		})
+		It("returns true for IPv6 address", func() {
+			addrs := []string{
+				"fe80::84ca:4a24:ffbf:1778/64",
+				"::/0",
+				"::1/128",
+				"::ffff:192.168.0.14/64",
+				"::ffff:192.168.0.14/16",
+			}
+			for _, addr := range addrs {
+				_, addr, _ := net.ParseCIDR(addr)
+				res := IsNetIPv6(*addr)
+				Expect(res).To(Equal(true))
+			}
+		})
+		It("returns true for IPv4-mapped-to-IPv6 address", func() {
+			// Because of non-obvious behaviour of net library when it comes to
+			// IPv4-mapped-to-IPv6 addresses (more in https://github.com/golang/go/issues/51906)
+			// we are adding tests where we explicitly create net.IPNet struct from a binary
+			// input.
+			addrs := []net.IPNet{
+				{
+					IP:   net.IP([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 192, 168, 1, 160}),
+					Mask: net.IPMask([]byte{255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0}),
+				},
+				{
+					IP:   net.IP([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 192, 168, 1, 160}),
+					Mask: net.IPMask([]byte{255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
+				},
+			}
+
+			for _, addr := range addrs {
+				res := IsNetIPv6(addr)
+				Expect(res).To(Equal(true))
+			}
+		})
 	})
 })
 

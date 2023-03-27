@@ -17,12 +17,38 @@ func SplitCIDR(s string) (string, string, error) {
 }
 
 func IsIPv4(ip net.IP) bool {
-	// func IsIPv4(ip string) bool {
 	return strings.Contains(ip.String(), ".")
 }
 
 func IsIPv6(ip net.IP) bool {
 	return strings.Contains(ip.String(), ":")
+}
+
+func IsNetIPv6(network net.IPNet) bool {
+	if IsIPv6(network.IP) {
+		return true
+	}
+
+	if IsIPv4(network.IP) {
+		// Sadly the fact that address has "." doesn't mean it's an IPv4 address. We need to check
+		// subnet masks to make sure this is really the case. If subnet mask is longer than 32 we
+		// are for sure dealing with IPv6 address. If it is shorter, then we need to look at the
+		// total capacity of the mask as it can be simply an IPv4 address but could be as well an
+		// IPv6 in really enormous subnet.
+		//
+		// To simplify this logic because subnet longer than 32 can happen if the capacity of mask
+		// matches IPv6, we can simply look at the capacity of the mask and determine IP stack.
+		_, n := network.Mask.Size()
+		if n == 32 {
+			return false
+		}
+		if n == 128 {
+			return true
+		}
+	}
+
+	log.Debugf("Failed to find IP stack of '%+v'", &network)
+	return false
 }
 
 func IpInCidr(ipAddr, cidr string) (bool, error) {

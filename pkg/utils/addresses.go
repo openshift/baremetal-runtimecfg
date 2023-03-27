@@ -140,7 +140,7 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 	}
 
 	var routeMap map[int][]netlink.Route
-	matches := make([]net.IP, 0)
+	matches := make([]net.IPNet, 0)
 	for link, addresses := range addrMap {
 	addrLoop:
 		for _, address := range addresses {
@@ -168,9 +168,12 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 						containmentNet := net.IPNet{IP: address.IP, Mask: route.Dst.Mask}
 						for _, vip := range vips {
 							log.Debugf("Checking whether address %s with route %s contains VIP %s", address, route, vip)
+							if IsNetIPv6(containmentNet) != IsIPv6(vip) {
+								log.Debugf("Stack of address '%s' and VIP '%s' does not match. Skipping.", address, vip)
+							}
 							if containmentNet.Contains(vip) {
 								log.Debugf("Address %s with route %s contains VIP %s", address, route, vip)
-								matches = append(matches, address.IP)
+								matches = append(matches, *address.IPNet)
 								break addrLoop
 							}
 						}
@@ -179,9 +182,12 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 			} else {
 				for _, vip := range vips {
 					log.Debugf("Checking whether address %s contains VIP %s", address, vip)
+					if IsNetIPv6(*address.IPNet) != IsIPv6(vip) {
+						log.Debugf("Stack of address '%s' and VIP '%s' does not match. Skipping.", address, vip)
+					}
 					if address.Contains(vip) {
 						log.Debugf("Address %s contains VIP %s", address, vip)
-						matches = append(matches, address.IP)
+						matches = append(matches, *address.IPNet)
 						break addrLoop
 					}
 				}
@@ -191,8 +197,8 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 		if len(matches) > 0 {
 			// Find an address of the opposite IP family on the same interface
 			for _, address := range addresses {
-				if IsIPv6(address.IP) != IsIPv6(matches[0]) {
-					matches = append(matches, address.IP)
+				if IsNetIPv6(*address.IPNet) != IsNetIPv6(matches[0]) {
+					matches = append(matches, *address.IPNet)
 					break
 				}
 			}
@@ -202,9 +208,9 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 	// Ensure we return addresses in the desired order
 	sort.SliceStable(matches, func(i, j int) bool {
 		// Very simplified since we only ever have two items in this list
-		return IsIPv6(matches[i]) == preferIPv6
+		return IsNetIPv6(matches[i]) == preferIPv6
 	})
-	return matches, nil
+	return Mapper(matches, func(ipnet net.IPNet) net.IP { return ipnet.IP }), nil
 }
 
 // defaultRoute returns true if the passed route is a default route
@@ -218,7 +224,7 @@ func AddressesDefault(preferIPv6 bool, af AddressFilter) ([]net.IP, error) {
 }
 
 type FoundAddress struct {
-	Address         net.IP
+	Network         net.IPNet
 	Priority        int
 	LinkIndex       int
 	GatewayOnSubnet bool
@@ -245,7 +251,7 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 			log.Debugf("Address %s is on interface %s with default route", address, link.Attrs().Name)
 			// We should only have one default route per interface
 			addrs = append(addrs, FoundAddress{
-				Address:         address.IP,
+				Network:         *address.IPNet,
 				Priority:        routeMap[linkIndex][0].Priority,
 				LinkIndex:       linkIndex,
 				GatewayOnSubnet: address.IPNet.Contains(routeMap[linkIndex][0].Gw),
@@ -262,13 +268,13 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	sort.SliceStable(addrs, func(i, j int) bool {
 		if addrs[i].Priority == addrs[j].Priority {
 			if addrs[i].LinkIndex == addrs[j].LinkIndex {
-				if IsIPv6(addrs[i].Address) == IsIPv6(addrs[j].Address) {
+				if IsNetIPv6(addrs[i].Network) == IsNetIPv6(addrs[j].Network) {
 					if addrs[i].GatewayOnSubnet == addrs[j].GatewayOnSubnet {
-						return !addrs[i].Address.IsPrivate()
+						return !addrs[i].Network.IP.IsPrivate()
 					}
 					return addrs[i].GatewayOnSubnet
 				}
-				return IsIPv6(addrs[i].Address) == preferIPv6
+				return IsNetIPv6(addrs[i].Network) == preferIPv6
 			}
 			return addrs[i].LinkIndex < addrs[j].LinkIndex
 		}
@@ -278,11 +284,11 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	foundv4 := false
 	foundv6 := false
 	for _, addr := range addrs {
-		if (IsIPv6(addr.Address) && foundv6) || (!IsIPv6(addr.Address) && foundv4) {
+		if (IsNetIPv6(addr.Network) && foundv6) || (!IsNetIPv6(addr.Network) && foundv4) {
 			continue
 		}
-		matches = append(matches, addr.Address)
-		if IsIPv6(addr.Address) {
+		matches = append(matches, addr.Network.IP)
+		if IsNetIPv6(addr.Network) {
 			foundv6 = true
 		} else {
 			foundv4 = true
