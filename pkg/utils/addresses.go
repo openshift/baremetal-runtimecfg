@@ -146,6 +146,12 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 		for _, address := range addresses {
 			isVip := false
 			for _, vip := range vips {
+				ip1 := address.Broadcast
+				ip2 := vip.To4()
+				if (ip1 != nil) != (ip2 != nil) {
+					log.Debug("Stack of address '%s' with broadcast '%s' and VIP '%s' does not match. Skipping.", address, address.Broadcast, vip)
+					continue
+				}
 				if address.IP.String() == vip.String() {
 					log.Debugf("Address %s is VIP %s. Skipping.", address, vip)
 					isVip = true
@@ -191,7 +197,7 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 		if len(matches) > 0 {
 			// Find an address of the opposite IP family on the same interface
 			for _, address := range addresses {
-				if IsIPv6(address.IP) != IsIPv6(matches[0]) {
+				if IsNetlinkIPv6(address) != IsIPv6(matches[0]) {
 					matches = append(matches, address.IP)
 					break
 				}

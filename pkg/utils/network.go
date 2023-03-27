@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/vishvananda/netlink"
 )
 
 func SplitCIDR(s string) (string, string, error) {
@@ -17,12 +19,26 @@ func SplitCIDR(s string) (string, string, error) {
 }
 
 func IsIPv4(ip net.IP) bool {
-	// func IsIPv4(ip string) bool {
 	return strings.Contains(ip.String(), ".")
 }
 
 func IsIPv6(ip net.IP) bool {
 	return strings.Contains(ip.String(), ":")
+}
+
+func IsNetlinkIPv6(addr netlink.Addr) bool {
+	// (mko) There may be some corner case when this function returns True, e.g. secondary IP
+	// assigned to the interface. Example below
+	//
+	//   link/ether xx:xx:xx:xx:xx:xx brd ff:ff:ff:ff:ff:ff
+	//   inet 192.0.2.251/29 brd 192.0.2.255 scope global bond0
+	//      valid_lft forever preferred_lft forever
+	//   inet 192.0.2.249/29 scope global secondary bond0
+	//      valid_lft forever preferred_lft forever
+	if strings.Contains(addr.IP.String(), ":") {
+		return true
+	}
+	return addr.Broadcast == nil
 }
 
 func IpInCidr(ipAddr, cidr string) (bool, error) {

@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -38,6 +39,12 @@ func maybeAddAddress(addrMap map[netlink.Link][]netlink.Addr, af AddressFilter, 
 	}
 	if !deprecated {
 		addr.PreferedLft = 999
+	}
+	if !strings.Contains(addrStr, ":") {
+		// IPv6 has no broadcast addresses at all. On the other hand IPv4 has them. We are going
+		// to use this property in order to distinguish vanilla IPv4 from IPv4-mapped-to-IPv6.
+		// For the purpose of testing we don't care about the value but only about nil-ness.
+		addr.Broadcast = net.ParseIP("255.255.255.255")
 	}
 	if af != nil && !af(*addr) {
 		return
@@ -102,6 +109,7 @@ func addIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
 	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true)
 	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true)
 	maybeAddAddress(addrs, af, eth1, "fd01::5/64", false)
+	maybeAddAddress(addrs, af, eth1, "::ffff:192.168.1.160/64", false)
 }
 
 func addIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
