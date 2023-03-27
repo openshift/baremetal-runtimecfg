@@ -281,11 +281,8 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	// Go to all node types identified in GetNodes()
 	for nodeRole := range nodes {
 		nodesConfigs := IsTheSameConfig(nodes[nodeRole])
-		if err != nil {
-			return false, err
-		}
-
 		if nodesConfigs {
+			// The configs are the same, NO RUNNING upgrade
 			return false, nil
 		}
 	}
