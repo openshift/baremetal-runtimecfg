@@ -270,7 +270,7 @@ func IsTheSameConfig(nodes []v1.Node) bool {
 //   - kubeconfigPath as string
 //
 // Returns:
-//   - true (same config), false or error
+//   - true (different config - upgrade still running), false (upgrade complete) or error
 func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	nodes, err := GetNodes(kubeconfigPath)
 	if err != nil {
@@ -280,12 +280,13 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	// Go to all node types identified in GetNodes()
 	for nodeRole := range nodes {
 		nodesConfigs := IsTheSameConfig(nodes[nodeRole])
-		if nodesConfigs {
-			// The configs are the same, NO RUNNING upgrade
-			return false, nil
+
+		if !nodesConfigs {
+			// at least one node group config is different
+			return true, nil
 		}
 	}
-	return true, nil
+	return false, nil
 }
 
 func GetIngressConfig(kubeconfigPath string, filterIpType string) (ingressConfig IngressConfig, err error) {
