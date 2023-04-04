@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/sirupsen/logrus"
 )
@@ -134,4 +135,12 @@ func GetClientConfig(kubeApiServerUrl, kubeconfigPath string) (*rest.Config, err
 	// and we should free connection in case it was stuck
 	config.Timeout = kubeClientTimeout
 	return config, err
+}
+
+func Mapper[T, U any](data []T, f func(T) U) []U {
+	res := make([]U, 0, len(data))
+	for _, e := range data {
+		res = append(res, f(e))
+	}
+	return res
 }

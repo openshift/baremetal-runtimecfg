@@ -98,6 +98,7 @@ func addIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
 	maybeAddAddress(addrs, af, lo, "::1/128", false)
 	maybeAddAddress(addrs, af, eth0, "fd00::5/64", false)
 	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false)
+	maybeAddAddress(addrs, af, eth0, "::ffff:192.168.1.160/64", false)
 	maybeAddAddress(addrs, af, eth1, "fd69::2/125", false)
 	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true)
 	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true)
