@@ -407,6 +407,13 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 					"curEnableUnicast":        curEnableUnicast,
 				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
 				newConfig.EnableUnicast = curEnableUnicast
+				// Make sure the nested configs respect the current setting
+				// for EnableUnicast too. In EUS upgrades nodes may make it
+				// to a release with dual stack VIPs without having migrated
+				// to unicast first.
+				for _, c := range *newConfig.Configs {
+					c.EnableUnicast = curEnableUnicast
+				}
 			}
 			updateUnicastConfig(kubeconfigPath, &newConfig)
 			curConfig = &newConfig
