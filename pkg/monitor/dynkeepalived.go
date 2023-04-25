@@ -407,13 +407,13 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 					"curEnableUnicast":        curEnableUnicast,
 				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
 				newConfig.EnableUnicast = curEnableUnicast
-				// Make sure the nested configs respect the current setting
-				// for EnableUnicast too. In EUS upgrades nodes may make it
-				// to a release with dual stack VIPs without having migrated
-				// to unicast first.
-				for _, c := range *newConfig.Configs {
-					c.EnableUnicast = curEnableUnicast
-				}
+			}
+			// Make sure the nested configs respect the current setting
+			// for EnableUnicast too. In EUS upgrades nodes may make it
+			// to a release with dual stack VIPs without having migrated
+			// to unicast first.
+			for i, _ := range *newConfig.Configs {
+				(*newConfig.Configs)[i].EnableUnicast = newConfig.EnableUnicast
 			}
 			updateUnicastConfig(kubeconfigPath, &newConfig)
 			curConfig = &newConfig
@@ -433,6 +433,9 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 					log.WithFields(logrus.Fields{
 						"curConfig": *curConfig,
 					}).Info("Apply config change")
+					for _, c := range *curConfig.Configs {
+						log.Info(c)
+					}
 
 					err = render.RenderFile(cfgPath, templatePath, newConfig)
 					if err != nil {
