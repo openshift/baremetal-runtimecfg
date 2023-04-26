@@ -365,13 +365,13 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			updateUnicastConfig(kubeconfigPath, &newConfig)
 
 			log.WithFields(logrus.Fields{
-				"curConfig": newConfig,
+				"curConfig": fmt.Sprintf("%+v", newConfig),
 			}).Info("Mode Update config change")
 
 			err = render.RenderFile(cfgPath, templatePath, newConfig)
 			if err != nil {
 				log.WithFields(logrus.Fields{
-					"config": newConfig,
+					"config": fmt.Sprintf("%+v", newConfig),
 				}).Error("Failed to render Keepalived configuration")
 				return err
 			}
@@ -417,20 +417,21 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 					configChangeCtr = 1
 				}
 				log.WithFields(logrus.Fields{
-					"current config":  *curConfig,
-					"configChangeCtr": configChangeCtr,
+					"current config":        fmt.Sprintf("%+v", *curConfig),
+					"current nested config": fmt.Sprintf("%+v", *curConfig.Configs),
+					"configChangeCtr":       configChangeCtr,
 				}).Info("Config change detected")
 
 				if configChangeCtr >= cfgKeepalivedChangeThreshold {
 
 					log.WithFields(logrus.Fields{
-						"curConfig": *curConfig,
+						"curConfig": fmt.Sprintf("%+v", *curConfig),
 					}).Info("Apply config change")
 
 					err = render.RenderFile(cfgPath, templatePath, newConfig)
 					if err != nil {
 						log.WithFields(logrus.Fields{
-							"config": newConfig,
+							"config": fmt.Sprintf("%+v", newConfig),
 						}).Error("Failed to render Keepalived configuration")
 						return err
 					}
