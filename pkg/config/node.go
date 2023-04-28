@@ -277,8 +277,21 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 		return false, err
 	}
 
+	kubeletVersion := ""
 	// Go to all node types identified in GetNodes()
 	for nodeRole := range nodes {
+		// Verify kubelet versions match. In EUS upgrades we may end up in an
+		// intermediate state where all of the nodes are "updated" as far as
+		// MCO is concerned, but are actually on different versions of OCP.
+		// In those cases, we do not consider the upgrade complete because not
+		// all nodes are ready for migration.
+		if kubeletVersion == "" {
+			kubeletVersion = nodes[nodeRole][0].Status.NodeInfo.KubeletVersion
+		}
+		if kubeletVersion != nodes[nodeRole][0].Status.NodeInfo.KubeletVersion {
+			return true, nil
+		}
+
 		nodesConfigs := IsTheSameConfig(nodes[nodeRole])
 
 		if !nodesConfigs {
