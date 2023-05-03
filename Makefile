@@ -6,6 +6,9 @@ IMAGE_NAME ?= origin-baremetal-runtimecfg
 IMAGE_BUILDER ?= podman
 IMAGE_DOCKERFILE ?= Dockerfile
 
+SHELL := /bin/bash
+GO_VERSION = $(shell hack/go-version.sh)
+
 .PHONY: fmt
 fmt: ## Run go fmt against code
 	go fmt ./pkg/... ./cmd/...
@@ -31,3 +34,8 @@ image: ## Build a local image
 .PHONY: push
 push: image ## Push the image to the registry. Will attempt to build the image first
 	$(IMAGE_BUILDER) push $(IMAGE_REGISTRY)/$(IMAGE_REPO)/$(IMAGE_NAME)
+
+.PHONY: vendor
+vendor:
+	go mod tidy -compat=$(GO_VERSION)
+	go mod vendor
