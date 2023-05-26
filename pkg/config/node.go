@@ -388,7 +388,9 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 
 		var ovnHostAddresses []string
 		if err := json.Unmarshal([]byte(node.Annotations["k8s.ovn.org/host-addresses"]), &ovnHostAddresses); err != nil {
-			log.Warnf("Couldn't unmarshall OVN annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Warnf("Couldn't unmarshall OVN annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
 		}
 
 	AddrList:
