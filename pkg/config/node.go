@@ -416,6 +416,7 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 			if match {
 				addr = hostAddr
 				log.Infof("For node %s selected peer address %s using using OVN annotations.", node.Name, addr)
+				break AddrList
 			}
 		}
 	}
