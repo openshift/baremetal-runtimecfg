@@ -394,6 +394,28 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 			log.Debugf("Dumping node object: %+v", node)
 		}
 
+		// Here we need to guarantee that local Node IP (i.e. NonVirtualIP) is present somewhere
+		// in the IngressConfig.Peers list. This makes "participateInIngressVRPP" to evaluate
+		// correctly on the local node where keepalived-monitor runs.
+		//
+		// We don't care about remote peers so use of GetVRRPConfig() is a natural choice as this
+		// function is used earlier to calculate NonVirtualIP - this guarantees selection of the
+		// same IP.
+		//
+		// We are checking if NonVirtualIP is present in the list of OVN annotations. If yes, we
+		// use it as a hint and simply pick this IP address.
+
+		_, nonVipAddr, _ := GetVRRPConfig(net.IP(filterIps[0]), nil)
+		suggestedIp := nonVipAddr.IP.String()
+		if suggestedIp != "" {
+			for _, hostAddr := range ovnHostAddresses {
+				if suggestedIp == hostAddr {
+					log.Infof("For node %s selected peer address %s using OVN annotations and suggestion.", node.Name, suggestedIp)
+					return suggestedIp, nil
+				}
+			}
+		}
+
 	AddrList:
 		for _, hostAddr := range ovnHostAddresses {
 			for _, filterIp := range filterIps {
