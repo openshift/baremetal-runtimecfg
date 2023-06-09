@@ -47,7 +47,7 @@ func getInterfaceAndNonVIPAddrFromFile(vip net.IP) (*net.Interface, *net.IPNet, 
 // NOTE(bnemec): All addresses in the vips array must be the same ip version
 func getInterfaceAndNonVIPAddr(vips []net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	if len(vips) < 1 {
-		return vipIface, nonVipAddr, fmt.Errorf("At least one VIP needs to be fed to this function")
+		return vipIface, nonVipAddr, fmt.Errorf("at least one correct IPv4/IPv6 VIP needs to be fed to this function")
 	}
 	vipMap := make(map[string]net.IP)
 	for _, vip := range vips {

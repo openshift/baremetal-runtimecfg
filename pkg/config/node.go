@@ -188,10 +188,10 @@ func (c *Cluster) PopulateVRIDs() error {
 
 func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	vips := make([]net.IP, 0)
-	if apiVip != nil {
+	if apiVip != nil && (utils.IsIPv4(apiVip) || utils.IsIPv6(apiVip)) {
 		vips = append(vips, apiVip)
 	}
-	if ingressVip != nil {
+	if ingressVip != nil && (utils.IsIPv4(ingressVip) || utils.IsIPv6(ingressVip)) {
 		vips = append(vips, ingressVip)
 	}
 	return getInterfaceAndNonVIPAddr(vips)
@@ -340,7 +340,9 @@ func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, erro
 	for _, node := range nodes.Items {
 		addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork)
 		if err != nil {
-			log.Warnf("For node %s could not retrieve node's IP. Ignoring", node.ObjectMeta.Name)
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Warnf("For node %s could not retrieve node's IP. Ignoring", node.ObjectMeta.Name)
 		} else {
 			ingressConfig.Peers = append(ingressConfig.Peers, addr)
 		}
@@ -391,7 +393,6 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 			log.WithFields(logrus.Fields{
 				"err": err,
 			}).Warnf("Couldn't unmarshall OVN annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
-			log.Debugf("Dumping node object: %+v", node)
 		}
 
 		// Here we need to guarantee that local Node IP (i.e. NonVirtualIP) is present somewhere
@@ -405,7 +406,10 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 		// We are checking if NonVirtualIP is present in the list of OVN annotations. If yes, we
 		// use it as a hint and simply pick this IP address.
 
-		_, nonVipAddr, _ := GetVRRPConfig(net.IP(filterIps[0]), nil)
+		_, nonVipAddr, err := GetVRRPConfig(net.ParseIP(filterIps[0]), nil)
+		if err != nil {
+			return "", err
+		}
 		suggestedIp := nonVipAddr.IP.String()
 		if suggestedIp != "" {
 			for _, hostAddr := range ovnHostAddresses {
@@ -623,7 +627,9 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	for _, node := range nodes.Items {
 		masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork)
 		if err != nil {
-			log.Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
 		} else {
 			backends = append(backends, Backend{Host: node.ObjectMeta.Name, Address: masterIp})
 		}
