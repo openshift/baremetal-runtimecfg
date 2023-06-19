@@ -187,8 +187,8 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 
 	// create Ticker that will run every round modeUpdateIntervalInSec
 	nextTickTime := time.Now().Add((modeUpdateIntervalInSec / 2) * time.Second).Round(modeUpdateIntervalInSec * time.Second)
-	time.Sleep(time.Until(nextTickTime))
-	ticker := time.NewTicker(modeUpdateIntervalInSec * time.Second)
+	// The first tick happens on nextTickTime, then we reset to the regular interval
+	ticker := time.NewTicker(time.Until(nextTickTime))
 	defer ticker.Stop()
 
 	for {
@@ -196,6 +196,7 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 		select {
 		case tickerTime := <-ticker.C:
 
+			ticker.Reset(modeUpdateIntervalInSec * time.Second)
 			updateRequired, desiredModeInfo := isModeUpdateNeeded(cfgPath)
 			if !updateRequired {
 				continue
