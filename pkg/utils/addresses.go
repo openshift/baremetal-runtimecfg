@@ -6,7 +6,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -34,7 +33,6 @@ func getAddrs(filter AddressFilter) (addrMap map[netlink.Link][]netlink.Addr, er
 	}
 
 	addrMap = make(map[netlink.Link][]netlink.Addr)
-	time.Sleep(60 * time.Second)
 	for _, link := range links {
 		addresses, err := nlHandle.AddrList(link, netlink.FAMILY_ALL)
 		if err != nil {
