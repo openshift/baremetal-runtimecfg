@@ -188,10 +188,10 @@ func (c *Cluster) PopulateVRIDs() error {
 
 func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAddr *net.IPNet, err error) {
 	vips := make([]net.IP, 0)
-	if apiVip != nil {
+	if apiVip != nil && (utils.IsIPv4(apiVip) || utils.IsIPv6(apiVip)) {
 		vips = append(vips, apiVip)
 	}
-	if ingressVip != nil {
+	if ingressVip != nil && (utils.IsIPv4(ingressVip) || utils.IsIPv6(ingressVip)) {
 		vips = append(vips, ingressVip)
 	}
 	return getInterfaceAndNonVIPAddr(vips)
@@ -296,7 +296,9 @@ func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, erro
 	for _, node := range nodes.Items {
 		addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork)
 		if err != nil {
-			log.Warnf("For node %s could not retrieve node's IP. Ignoring", node.ObjectMeta.Name)
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Warnf("For node %s could not retrieve node's IP. Ignoring", node.ObjectMeta.Name)
 		} else {
 			ingressConfig.Peers = append(ingressConfig.Peers, addr)
 		}
@@ -344,7 +346,34 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 
 		var ovnHostAddresses []string
 		if err := json.Unmarshal([]byte(node.Annotations["k8s.ovn.org/host-addresses"]), &ovnHostAddresses); err != nil {
-			log.Warnf("Couldn't unmarshall OVN annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Warnf("Couldn't unmarshall OVN annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
+		}
+
+		// Here we need to guarantee that local Node IP (i.e. NonVirtualIP) is present somewhere
+		// in the IngressConfig.Peers list. This makes "participateInIngressVRPP" to evaluate
+		// correctly on the local node where keepalived-monitor runs.
+		//
+		// We don't care about remote peers so use of GetVRRPConfig() is a natural choice as this
+		// function is used earlier to calculate NonVirtualIP - this guarantees selection of the
+		// same IP.
+		//
+		// We are checking if NonVirtualIP is present in the list of OVN annotations. If yes, we
+		// use it as a hint and simply pick this IP address.
+
+		_, nonVipAddr, err := GetVRRPConfig(net.ParseIP(filterIps[0]), nil)
+		if err != nil {
+			return "", err
+		}
+		suggestedIp := nonVipAddr.IP.String()
+		if suggestedIp != "" {
+			for _, hostAddr := range ovnHostAddresses {
+				if suggestedIp == hostAddr {
+					log.Infof("For node %s selected peer address %s using OVN annotations and suggestion.", node.Name, suggestedIp)
+					return suggestedIp, nil
+				}
+			}
 		}
 
 	AddrList:
@@ -369,6 +398,7 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 			if match {
 				addr = hostAddr
 				log.Infof("For node %s selected peer address %s using using OVN annotations.", node.Name, addr)
+				break AddrList
 			}
 		}
 	}
@@ -553,7 +583,9 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	for _, node := range nodes.Items {
 		masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork)
 		if err != nil {
-			log.Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
 		} else {
 			backends = append(backends, Backend{Host: node.ObjectMeta.Name, Address: masterIp})
 		}
