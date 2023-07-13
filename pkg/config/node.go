@@ -195,24 +195,14 @@ func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAdd
 	return getInterfaceAndNonVIPAddr(vips)
 }
 
-// GetNodes will collect all nodes which contain the annotation node-role.kubernetes.io/${VAR} annotation
-// and return a map with the data.
-//
-// i.e:
-//	node-role.kubernetes.io/master
-//	node-role.kubernetes.io/worker
-//	node-role.kubernetes.io/infra
-//	etc.
+// GetNodes will return a list of all nodes in the cluster
 //
 // Args:
 //      - kubeconfigPath as string
 //
 // Returns:
-//      - map[string][]v1.Node or error
-//
-func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
-	nodeCluster := make(map[string][]v1.Node)
-
+//   - v1.NodeList or error
+func GetNodes(kubeconfigPath string) (*v1.NodeList, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return nil, err
@@ -227,50 +217,19 @@ func GetNodes(kubeconfigPath string) (map[string][]v1.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	for _, node := range nodes.Items {
-		// Get all labels for *each node* which contain node-role.kubernetes.io/
-		for label := range node.Labels {
-			switch {
-			case strings.HasPrefix(label, labelNodeRolePrefix):
-				if role := strings.TrimPrefix(label, labelNodeRolePrefix); len(role) > 0 {
-					nodeCluster[role] = append(nodeCluster[role], node)
-				}
-			}
-		}
-	}
-	return nodeCluster, nil
+	return nodes, nil
 }
 
-// IsTheSameConfig will compare the config annotations
-//
-// Args:
-//      - The node list based on v1.NodeList
-//
-// Returns:
-//      - true (same config) or false
-//
-func IsTheSameConfig(nodes []v1.Node) bool {
-	desiredConfig := "machineconfiguration.openshift.io/desiredConfig"
-	currentConfig := "machineconfiguration.openshift.io/currentConfig"
-
-	for _, node := range nodes {
-		if node.Annotations[desiredConfig] != node.Annotations[currentConfig] ||
-			node.Annotations[desiredConfig] != nodes[0].Annotations[desiredConfig] {
-			return false
-		}
-	}
-	return true
-}
-
-// IsUpgradeStillRunning check if the upgrade still running in the nodes
-// comparing the node's state.
+// IsUpgradeStillRunning check if the upgrade is still running by looking at
+// the nodes' machineconfiguration state and kubelet version. Once all of the
+// machineconfigurations are Done and all kubelet versions match we know it
+// is safe to trigger the unicast migration.
 //
 // Args:
 //   - kubeconfigPath as string
 //
 // Returns:
-//   - true (different config - upgrade still running), false (upgrade complete) or error
+//   - true (upgrade still running), false (upgrade complete) or error
 func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	nodes, err := GetNodes(kubeconfigPath)
 	if err != nil {
@@ -278,24 +237,20 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	}
 
 	kubeletVersion := ""
-	// Go to all node types identified in GetNodes()
-	for nodeRole := range nodes {
+	stateAnnotation := "machineconfiguration.openshift.io/state"
+	for _, node := range nodes.Items {
 		// Verify kubelet versions match. In EUS upgrades we may end up in an
 		// intermediate state where all of the nodes are "updated" as far as
 		// MCO is concerned, but are actually on different versions of OCP.
 		// In those cases, we do not consider the upgrade complete because not
 		// all nodes are ready for migration.
 		if kubeletVersion == "" {
-			kubeletVersion = nodes[nodeRole][0].Status.NodeInfo.KubeletVersion
+			kubeletVersion = node.Status.NodeInfo.KubeletVersion
 		}
-		if kubeletVersion != nodes[nodeRole][0].Status.NodeInfo.KubeletVersion {
+		if kubeletVersion != node.Status.NodeInfo.KubeletVersion {
 			return true, nil
 		}
-
-		nodesConfigs := IsTheSameConfig(nodes[nodeRole])
-
-		if !nodesConfigs {
-			// at least one node group config is different
+		if node.Annotations[stateAnnotation] != "Done" {
 			return true, nil
 		}
 	}
