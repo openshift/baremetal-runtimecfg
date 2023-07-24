@@ -38,6 +38,11 @@ func getAddrs(filter AddressFilter) (addrMap map[netlink.Link][]netlink.Addr, er
 		if err != nil {
 			return nil, err
 		}
+
+		if link.Attrs().OperState.String() != "up" {
+			log.Debugf("Link with addresses not up %+v", addresses)
+			continue
+		}
 		for _, address := range addresses {
 			if filter != nil && !filter(address) {
 				log.Debugf("Ignoring filtered address %+v", address)
