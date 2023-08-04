@@ -58,20 +58,22 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
-func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) {
+func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
 	var err error
 
 	if !newConfig.EnableUnicast {
-		return
+		return err
 	}
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{newConfig.Cluster.APIVIP, newConfig.Cluster.IngressVIP})
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
+		return err
 	}
 
 	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(newConfig.Cluster.APIVIP), net.ParseIP(newConfig.Cluster.IngressVIP)})
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
+		return err
 	}
 
 	for i, c := range *newConfig.Configs {
@@ -79,12 +81,15 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) {
 		(*newConfig.Configs)[i].IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{c.Cluster.APIVIP, c.Cluster.IngressVIP})
 		if err != nil {
 			log.Warnf("Could not retrieve ingress config: %v", err)
+			return err
 		}
 		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(c.Cluster.APIVIP), net.ParseIP(c.Cluster.IngressVIP)})
 		if err != nil {
 			log.Warnf("Could not retrieve LB config: %v", err)
+			return err
 		}
 	}
+	return nil
 }
 
 func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
@@ -363,7 +368,14 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			} else {
 				newConfig.EnableUnicast = false
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig)
+			// We have to get a valid unicast config before the migration
+			for {
+				err = updateUnicastConfig(kubeconfigPath, &newConfig)
+				if err == nil {
+					break
+				}
+				time.Sleep(interval)
+			}
 
 			log.WithFields(logrus.Fields{
 				"curConfig": fmt.Sprintf("%+v", newConfig),
@@ -416,7 +428,13 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			for i, _ := range *newConfig.Configs {
 				(*newConfig.Configs)[i].EnableUnicast = newConfig.EnableUnicast
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig)
+			err = updateUnicastConfig(kubeconfigPath, &newConfig)
+			if err != nil {
+				// We don't want to render a new config with an incomplete
+				// unicast peer list
+				time.Sleep(interval)
+				continue
+			}
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
