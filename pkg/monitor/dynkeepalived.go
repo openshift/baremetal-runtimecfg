@@ -58,21 +58,24 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
-func updateUnicastConfig(kubeconfigPath string, newConfig, appliedConfig *config.Node) {
+func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
 	var err error
 
 	if !newConfig.EnableUnicast {
-		return
+		return err
 	}
 	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, newConfig.Cluster.APIVIP)
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
+		return err
 	}
 
 	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, net.ParseIP(newConfig.Cluster.APIVIP))
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
+		return err
 	}
+	return nil
 }
 
 func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
@@ -338,7 +341,14 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			} else {
 				newConfig.EnableUnicast = false
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			// We have to get a valid unicast config before the migration
+			for {
+				err = updateUnicastConfig(kubeconfigPath, &newConfig)
+				if err == nil {
+					break
+				}
+				time.Sleep(interval)
+			}
 
 			log.WithFields(logrus.Fields{
 				"curConfig": newConfig,
@@ -384,7 +394,13 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				}).Debug("EnableUnicast != enableUnicast from cfg file, update EnableUnicast value")
 				newConfig.EnableUnicast = curEnableUnicast
 			}
-			updateUnicastConfig(kubeconfigPath, &newConfig, appliedConfig)
+			err = updateUnicastConfig(kubeconfigPath, &newConfig)
+			if err != nil {
+				// We don't want to render a new config with an incomplete
+				// unicast peer list
+				time.Sleep(interval)
+				continue
+			}
 			curConfig = &newConfig
 			if doesConfigChanged(curConfig, appliedConfig) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
