@@ -407,6 +407,34 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			appliedConfig = curConfig
 
 		default:
+			// Signal to keepalived whether the haproxy firewall rule is in place
+			// The rules are all managed as a single entity, so we should only need
+			// to check the first VIP.
+			// NOTE(bnemec): We are now doing this first so it doesn't get skipped
+			// if there is a problem updating the peer list below, which can result
+			// in the VIP remaining on a node without API connectivity.
+			ruleExists, err := checkHAProxyFirewallRules(apiVips[0].String(), apiPort, lbPort)
+			if err != nil {
+				log.Error("Failed to check for haproxy firewall rule")
+			} else {
+				_, err := os.Stat(iptablesFilePath)
+				fileExists := !os.IsNotExist(err)
+				if ruleExists {
+					if !fileExists {
+						_, err := os.Create(iptablesFilePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to create file")
+						}
+					}
+				} else {
+					if fileExists {
+						err := os.Remove(iptablesFilePath)
+						if err != nil {
+							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to remove file")
+						}
+					}
+				}
+			}
 			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0)
 			if err != nil {
 				return err
@@ -476,31 +504,6 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			}
 			prevConfig = &newConfig
 
-			// Signal to keepalived whether the haproxy firewall rule is in place
-			// The rules are all managed as a single entity, so we should only need
-			// to check the first VIP.
-			ruleExists, err := checkHAProxyFirewallRules(apiVips[0].String(), apiPort, lbPort)
-			if err != nil {
-				log.Error("Failed to check for haproxy firewall rule")
-			} else {
-				_, err := os.Stat(iptablesFilePath)
-				fileExists := !os.IsNotExist(err)
-				if ruleExists {
-					if !fileExists {
-						_, err := os.Create(iptablesFilePath)
-						if err != nil {
-							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to create file")
-						}
-					}
-				} else {
-					if fileExists {
-						err := os.Remove(iptablesFilePath)
-						if err != nil {
-							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to remove file")
-						}
-					}
-				}
-			}
 			time.Sleep(interval)
 		}
 	}
