@@ -102,8 +102,11 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	log.WithFields(logrus.Fields{
 		"curConfig": *curConfig,
 	}).Info("Current config is: ")
+	log.Warnf("backends length: %v", len(curConfig.LBConfig.Backends))
+        log.Warnf("backends: %v", curConfig.LBConfig.Backends)
+
 	if curConfig.EnableUnicast {
-		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 1 {
+		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 2 {
 			validConfig = false
 		}
 	}
