@@ -105,8 +105,8 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 		}
 	}
 	log.WithFields(logrus.Fields{
-		"cfgChanged":  cfgChanged,
-		"validConfig": validConfig,
+		"cfgChanged2":  cfgChanged,
+		"validConfig2": validConfig,
 	}).Info("Checking the config bool")
 	return cfgChanged && validConfig
 }
