@@ -93,6 +93,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
 }
 
 func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
+	log.Info("Entering doesConfigChanged")
 	validConfig := true
 	cfgChanged := appliedConfig == nil || !cmp.Equal(*appliedConfig, *curConfig)
 	// In unicast mode etcd is used for sync purpose between bootstrap and the masters nodes,
@@ -103,6 +104,10 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 			validConfig = false
 		}
 	}
+	log.WithFields(logrus.Fields{
+		"cfgChanged":  cfgChanged,
+		"validConfig": validConfig,
+	}).Info("Checking the config bool")
 	return cfgChanged && validConfig
 }
 
@@ -458,6 +463,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			}
 			err = updateUnicastConfig(kubeconfigPath, &newConfig)
 			if err != nil {
+				log.Warnf("Some how got an error: %v", err)
 				// We don't want to render a new config with an incomplete
 				// unicast peer list
 				time.Sleep(interval)
