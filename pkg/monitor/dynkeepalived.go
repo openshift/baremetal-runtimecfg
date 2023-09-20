@@ -99,8 +99,11 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	// In unicast mode etcd is used for sync purpose between bootstrap and the masters nodes,
 	// we want to apply new config to master nodes only after nodes appears in etcd, with this
 	// approach we should avoid asymetric configuration
+	log.WithFields(logrus.Fields{
+		"curConfig": *curConfig,
+	}).Info("Current config is: ")
 	if curConfig.EnableUnicast {
-		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 2 {
+		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 1 {
 			validConfig = false
 		}
 	}
