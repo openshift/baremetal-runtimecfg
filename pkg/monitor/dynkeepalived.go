@@ -147,11 +147,13 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState) {
 	consecutiveErr := 0
 
-	/* It could take up to ~20 seconds for the local kube-apiserver to start running on the bootstrap node,
-	so before checking if kube-apiserver is not operational we should verify (with a timeout of 30 seconds)
-	first that it's operational. */
+	/* It should take up to ~20 seconds for the local kube-apiserver to start running on the
+	bootstrap node,	so before doing anything we should verify that it's operational. Usually this
+	causes no trouble, but every now and then (e.g. when performance is not great) we can see that
+	this needs much longer timeout. We add here 30 minutes as an equivalent of infinity.
+	*/
 	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
-	for start := time.Now(); time.Since(start) < time.Second*30; {
+	for start := time.Now(); time.Since(start) < time.Minute*30; {
 		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}); err == nil {
 			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
 			break
