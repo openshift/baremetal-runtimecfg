@@ -212,7 +212,7 @@ func IsUpgradeStillRunning(kubeClient *KubeClient) (bool, error) {
 
 	kubeletVersion := ""
 	stateAnnotation := "machineconfiguration.openshift.io/state"
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
 		// Verify kubelet versions match. In EUS upgrades we may end up in an
 		// intermediate state where all of the nodes are "updated" as far as
 		// MCO is concerned, but are actually on different versions of OCP.
@@ -256,7 +256,7 @@ func GetIngressConfig(kubeClient *KubeClient, vips []string) (IngressConfig, err
 		}
 	}
 
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
 		addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork)
 		if err != nil {
 			log.WithFields(logrus.Fields{
@@ -270,7 +270,7 @@ func GetIngressConfig(kubeClient *KubeClient, vips []string) (IngressConfig, err
 	return ingressConfig, nil
 }
 
-func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwork string) (string, error) {
+func getNodeIpForRequestedIpStack(node *v1.Node, filterIps []string, machineNetwork string) (string, error) {
 	log.Infof("Searching for Node IP of %s. Using '%s' as machine network. Filtering out VIPs '%s'.", node.Name, machineNetwork, filterIps)
 
 	if len(filterIps) == 0 {
@@ -526,7 +526,7 @@ func getSortedBackends(kubeClient *KubeClient, vips []net.IP) (backends []Backen
 		return []Backend{}, err
 	}
 
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
 		masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork)
 		if err != nil {
 			log.WithFields(logrus.Fields{
@@ -598,7 +598,7 @@ func PopulateNodeAddresses(kubeClient *KubeClient, node *Node) {
 		return
 	}
 	var nodeAddresses []net.IP
-	for _, n := range nodes.Items {
+	for _, n := range nodes {
 		name := ""
 		nodeAddresses = nil
 		for _, a := range n.Status.Addresses {

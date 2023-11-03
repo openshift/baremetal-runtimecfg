@@ -14,14 +14,14 @@ var (
 		"k8s.ovn.org/host-addresses": "[\"192.168.1.102\",\"192.168.1.99\",\"192.168.1.101\",\"fd00::101\",\"2001:db8::49a\",\"fd00::102\",\"fd00::5\",\"fd69::2\"]",
 	}
 
-	testNodeDualStack1 = v1.Node{
+	testNodeDualStack1 = &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "testNode"},
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
 			{Type: "InternalIP", Address: "192.168.1.99"},
 			{Type: "InternalIP", Address: "fd00::5"},
 			{Type: "ExternalIP", Address: "172.16.1.99"},
 		}}}
-	testNodeDualStack2 = v1.Node{
+	testNodeDualStack2 = &v1.Node{
 
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
 			{Type: "InternalIP", Address: "192.168.1.99"},
@@ -32,19 +32,19 @@ var (
 			Annotations: testOvnHostAddressesAnnotation,
 		},
 	}
-	testNodeDualStack3 = v1.Node{
+	testNodeDualStack3 = &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "testNode",
 			Annotations: testOvnHostAddressesAnnotation,
 		},
 	}
-	testNodeSingleStackV4 = v1.Node{
+	testNodeSingleStackV4 = &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "testNode"},
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
 			{Type: "InternalIP", Address: "192.168.1.99"},
 			{Type: "ExternalIP", Address: "172.16.1.99"},
 		}}}
-	testNodeSingleStackV6 = v1.Node{
+	testNodeSingleStackV6 = &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "testNode"},
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
 			{Type: "InternalIP", Address: "fd00::5"},
@@ -128,7 +128,7 @@ var _ = Describe("getNodePeersForIpStack", func() {
 	})
 
 	It("empty for empty node", func() {
-		res, err := getNodeIpForRequestedIpStack(v1.Node{}, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
+		res, err := getNodeIpForRequestedIpStack(&v1.Node{}, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 		Expect(res).To(Equal(""))
 		Expect(err).To(BeNil())
 	})

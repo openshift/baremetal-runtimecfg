@@ -18,16 +18,16 @@ const resolvConfFilepath string = "/var/run/NetworkManager/resolv.conf"
 
 func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, interval time.Duration) error {
 	signals := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
+	done := make(chan struct{}, 1)
 
 	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGINT)
 	go func() {
 		<-signals
-		done <- true
+		close(done)
 	}()
 
-	kubeClient, err := config.NewKubeClient("", kubeconfigPath)
+	kubeClient, err := config.NewKubeClient("", kubeconfigPath, done)
 	if err != nil {
 		return err
 	}

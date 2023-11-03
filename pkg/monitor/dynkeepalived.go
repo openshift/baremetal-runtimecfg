@@ -299,7 +299,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	}
 
 	signals := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
+	done := make(chan struct{}, 1)
 	updateModeCh := make(chan modeUpdateInfo, 1)
 	bootstrapStopKeepalived := make(chan APIState, 1)
 
@@ -307,14 +307,14 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	signal.Notify(signals, syscall.SIGINT)
 	go func() {
 		<-signals
-		done <- true
+		close(done)
 	}()
 
-	kubeClient, err := config.NewKubeClient("", kubeconfigPath)
+	kubeClient, err := config.NewKubeClient("", kubeconfigPath, done)
 	if err != nil {
 		return err
 	}
-	localKubeClient, err := config.NewKubeClient(config.LocalhostKubeApiServerUrl, kubeconfigPath)
+	localKubeClient, err := config.NewKubeClient(config.LocalhostKubeApiServerUrl, kubeconfigPath, done)
 	if err != nil {
 		return err
 	}
