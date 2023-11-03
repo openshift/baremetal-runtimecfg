@@ -43,6 +43,15 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath s
 		done <- true
 	}()
 
+	kubeClient, err := config.NewKubeClient("", kubeconfigPath)
+	if err != nil {
+		return err
+	}
+	localKubeClient, err := config.NewKubeClient(config.LocalhostKubeApiServerUrl, kubeconfigPath)
+	if err != nil {
+		return err
+	}
+
 	conn, err := net.Dial("unix", haproxyMasterSock)
 	if err != nil {
 		return err
@@ -58,11 +67,9 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath s
 			}
 			return nil
 		default:
-			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, []net.IP{net.ParseIP(apiVips[0])})
+			config, err := config.GetLBConfig(kubeClient, localKubeClient, apiPort, lbPort, statPort, []net.IP{net.ParseIP(apiVips[0])})
 			if err != nil {
-				log.WithFields(logrus.Fields{
-					"kubeconfigPath": kubeconfigPath,
-				}).Info("GetLBConfig failed, sleep half of interval and retry")
+				log.Info("GetLBConfig failed, sleep half of interval and retry")
 				time.Sleep(interval / 2)
 				continue
 			}

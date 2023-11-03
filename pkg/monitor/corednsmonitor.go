@@ -27,6 +27,11 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 		done <- true
 	}()
 
+	kubeClient, err := config.NewKubeClient("", kubeconfigPath)
+	if err != nil {
+		return err
+	}
+
 	prevMD5, err := utils.GetFileMd5(resolvConfFilepath)
 	if err != nil {
 		return err
@@ -46,7 +51,7 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 			if err != nil {
 				return err
 			}
-			config.PopulateNodeAddresses(kubeconfigPath, &newConfig)
+			config.PopulateNodeAddresses(kubeClient, &newConfig)
 			// There should never be 0 nodes in a functioning cluster. This means
 			// we failed to populate the list, so we don't want to render.
 			if len(newConfig.Cluster.NodeAddresses) == 0 {

@@ -2,7 +2,6 @@ package config
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +15,6 @@ import (
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
@@ -25,7 +22,7 @@ import (
 )
 
 const (
-	localhostKubeApiServerUrl string = "https://localhost:6443"
+	LocalhostKubeApiServerUrl string = "https://localhost:6443"
 	// labelNodeRolePrefix is a label prefix for node roles
 	labelNodeRolePrefix = "node-role.kubernetes.io/"
 )
@@ -197,43 +194,18 @@ func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAdd
 	return getInterfaceAndNonVIPAddr(vips)
 }
 
-// GetNodes will return a list of all nodes in the cluster
-//
-// Args:
-//   - kubeconfigPath as string
-//
-// Returns:
-//   - v1.NodeList or error
-func GetNodes(kubeconfigPath string) (*v1.NodeList, error) {
-	config, err := utils.GetClientConfig("", kubeconfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return nodes, nil
-}
-
 // IsUpgradeStillRunning check if the upgrade is still running by looking at
 // the nodes' machineconfiguration state and kubelet version. Once all of the
 // machineconfigurations are Done and all kubelet versions match we know it
 // is safe to trigger the unicast migration.
 //
 // Args:
-//   - kubeconfigPath as string
+//   - kubeClient as *KubeClient
 //
 // Returns:
 //   - true (upgrade still running), false (upgrade complete) or error
-func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
-	nodes, err := GetNodes(kubeconfigPath)
+func IsUpgradeStillRunning(kubeClient *KubeClient) (bool, error) {
+	nodes, err := kubeClient.ListNodes("")
 	if err != nil {
 		return false, err
 	}
@@ -259,20 +231,11 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	return false, nil
 }
 
-func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, error) {
+func GetIngressConfig(kubeClient *KubeClient, vips []string) (IngressConfig, error) {
 	var machineNetwork string
 	var ingressConfig IngressConfig
 
-	config, err := utils.GetClientConfig("", kubeconfigPath)
-	if err != nil {
-		return ingressConfig, err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return ingressConfig, err
-	}
-
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	nodes, err := kubeClient.ListNodes("")
 	if err != nil {
 		return ingressConfig, err
 	}
@@ -539,25 +502,8 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 
 // getSortedBackends builds config to communicate with kube-api based on kubeconfigPath parameter value, if kubeconfigPath is not empty it will build the
 // config based on that content else config will point to localhost.
-func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.IP) (backends []Backend, err error) {
-	kubeApiServerUrl := ""
-	if readFromLocalAPI {
-		kubeApiServerUrl = localhostKubeApiServerUrl
-	}
-	config, err := utils.GetClientConfig(kubeApiServerUrl, kubeconfigPath)
-	if err != nil {
-		return []Backend{}, err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"err": err,
-		}).Info("Failed to get client")
-		return []Backend{}, err
-	}
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "node-role.kubernetes.io/master=",
-	})
+func getSortedBackends(kubeClient *KubeClient, vips []net.IP) (backends []Backend, err error) {
+	nodes, err := kubeClient.ListNodes("node-role.kubernetes.io/master=")
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"err": err,
@@ -597,7 +543,7 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	return backends, err
 }
 
-func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP) (ApiLBConfig, error) {
+func GetLBConfig(kubeClient, localKubeClient *KubeClient, apiPort, lbPort, statPort uint16, vips []net.IP) (ApiLBConfig, error) {
 	config := ApiLBConfig{
 		ApiPort:  apiPort,
 		LbPort:   lbPort,
@@ -613,15 +559,13 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips [
 		config.FrontendAddr = "::"
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
-	backends, err := getSortedBackends(kubeconfigPath, false, vips)
+	backends, err := getSortedBackends(kubeClient, vips)
 	if err != nil {
 		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
 		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
-		backends, err = getSortedBackends(kubeconfigPath, true, vips)
+		backends, err = getSortedBackends(localKubeClient, vips)
 		if err != nil {
-			log.WithFields(logrus.Fields{
-				"kubeconfigPath": kubeconfigPath,
-			}).Error("Failed to retrieve API members information")
+			log.Error("Failed to retrieve API members information")
 			return config, err
 		}
 	}
@@ -647,20 +591,8 @@ func GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath string) (clusterN
 	return
 }
 
-func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
-	// Get node list
-	config, err := utils.GetClientConfig("", kubeconfigPath)
-	if err != nil {
-		log.Errorf("Failed to build client config: %s", err)
-		return
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Errorf("Failed to create client: %s", err)
-		return
-	}
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+func PopulateNodeAddresses(kubeClient *KubeClient, node *Node) {
+	nodes, err := kubeClient.ListNodes("")
 	if err != nil {
 		log.Errorf("Failed to get node list: %s", err)
 		return
