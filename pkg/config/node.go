@@ -565,7 +565,7 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 		return []Backend{}, err
 	}
 	if len(vips) == 0 {
-		return []Backend{}, fmt.Errorf("Trying to build config using empty VIPs")
+		return []Backend{}, fmt.Errorf("Unable to build config using empty VIPs")
 	}
 
 	// As it is not possible to get cluster's Machine Network directly, we are using a workaround
