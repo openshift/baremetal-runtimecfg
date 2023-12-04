@@ -16,7 +16,7 @@ import (
 
 const resolvConfFilepath string = "/var/run/NetworkManager/resolv.conf"
 
-func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, interval time.Duration) error {
+func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, interval time.Duration, apiLBIPs, apiIntLBIPs, ingressLBIPs []net.IP) error {
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 
@@ -42,10 +42,19 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 			if err != nil {
 				return err
 			}
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0)
+			clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0, clusterLBConfig)
 			if err != nil {
 				return err
 			}
+
+			// Populate cloud LB IP addresses for platforms where the cloud LBs
+			// have already been configured
+			newConfig, err = config.PopulateCloudLBIPAddresses(clusterLBConfig, newConfig)
+			if err != nil {
+				return err
+			}
+
 			config.PopulateNodeAddresses(kubeconfigPath, &newConfig)
 			// There should never be 0 nodes in a functioning cluster. This means
 			// we failed to populate the list, so we don't want to render.

@@ -52,6 +52,11 @@ type Cluster struct {
 	VIPNetmask             int
 	MasterAmount           int64
 	NodeAddresses          []NodeAddress
+	APILBIPs               []string
+	APIIntLBIPs            []string
+	IngressLBIPs           []string
+	CloudLBRecordType      string
+	CloudLBEmptyType       string
 }
 
 type Backend struct {
@@ -82,6 +87,12 @@ type Node struct {
 	IngressConfig IngressConfig
 	EnableUnicast bool
 	Configs       *[]Node
+}
+
+type ClusterLBConfig struct {
+	ApiLBIPs     []net.IP
+	ApiIntLBIPs  []net.IP
+	IngressLBIPs []net.IP
 }
 
 func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
@@ -417,7 +428,13 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 // apiPort: The port on which the k8s api listens. Should be 6443.
 // lbPort: The port on which haproxy listens.
 // statPort: The port on which the haproxy stats endpoint listens.
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+// clusterLBConfig: A struct containing IPs for API, API-Int and Ingress LBs
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, clusterLBConfig ClusterLBConfig) (node Node, err error) {
+	if len(clusterLBConfig.ApiIntLBIPs) > 0 {
+		// Cloud Platforms with cloud LBs but no Cloud DNS
+		return getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath, clusterLBConfig)
+	}
+	// On-prem platforms
 	vipCount := 0
 	if len(apiVips) > len(ingressVips) {
 		vipCount = len(apiVips)
@@ -693,4 +710,95 @@ func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
 			node.Cluster.NodeAddresses = append(node.Cluster.NodeAddresses, NodeAddress{Address: addr.String(), Name: name, Ipv6: ipv6})
 		}
 	}
+}
+
+func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath string, clusterLBConfig ClusterLBConfig) (node Node, err error) {
+	var apiLBIP, apiIntLBIP, ingressIP net.IP
+	nodes := []Node{}
+
+	// The number of LB IPs provided in ClusterLBConfig's ApiIntLBIPs, ApiLBIPs and IngressLBIPs
+	// could all be different. In private clusters, there would be no API LB IPs provided. So,to
+	// account for the varying lengths we determine the longest between the list of Ingress LB
+	// IPs and API-Int LB IPs. When present, len(ApiLBIPs) is equal to len(ApiIntLBIPs).
+	ipCount := 0
+	if len(clusterLBConfig.ApiIntLBIPs) > len(clusterLBConfig.IngressLBIPs) {
+		ipCount = len(clusterLBConfig.ApiIntLBIPs)
+	} else {
+		ipCount = len(clusterLBConfig.IngressLBIPs)
+	}
+
+	// Iterate through the longest list of LB IPs and provide an API, API-Int and Ingress
+	// LB IP to each newly created Node. When a list has no more LB IPs, update Node object
+	// with a nil IP address.
+	for i := 0; i < ipCount; i++ {
+		if i < len(clusterLBConfig.ApiIntLBIPs) {
+			apiIntLBIP = clusterLBConfig.ApiIntLBIPs[i]
+		} else {
+			apiIntLBIP = nil
+		}
+
+		// For public clusters. Private clusters will not have External
+		// LBs so apiLBIPs could be empty.
+		if len(clusterLBConfig.ApiLBIPs) != 0 && i < len(clusterLBConfig.ApiLBIPs) {
+			apiLBIP = clusterLBConfig.ApiLBIPs[i]
+		} else {
+			apiLBIP = nil
+		}
+		if len(clusterLBConfig.IngressLBIPs) != 0 && i < len(clusterLBConfig.IngressLBIPs) {
+			ingressIP = clusterLBConfig.IngressLBIPs[i]
+		} else {
+			ingressIP = nil
+		}
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0)
+		if err != nil {
+			return Node{}, err
+		}
+		newNode = updateNodewithCloudLBIPs(apiLBIP, apiIntLBIP, ingressIP, newNode)
+		nodes = append(nodes, newNode)
+	}
+	nodes[0].Configs = &nodes
+	return nodes[0], nil
+}
+
+func updateNodewithCloudLBIPs(apiLBIP, apiIntLBIP, ingressIP net.IP, node Node) Node {
+	var validLBIP net.IP
+	if apiIntLBIP != nil {
+		validLBIP = apiIntLBIP
+		node.Cluster.APIIntLBIPs = append(node.Cluster.APIIntLBIPs, apiIntLBIP.String())
+	}
+	if apiLBIP != nil {
+		node.Cluster.APILBIPs = append(node.Cluster.APILBIPs, apiLBIP.String())
+	}
+	if ingressIP != nil {
+		node.Cluster.IngressLBIPs = append(node.Cluster.IngressLBIPs, ingressIP.String())
+		if validLBIP == nil {
+			validLBIP = ingressIP
+		}
+	}
+	node.Cluster.CloudLBRecordType = "A"
+	node.Cluster.CloudLBEmptyType = "AAAA"
+	if validLBIP.To4() == nil {
+		node.Cluster.CloudLBRecordType = "AAAA"
+		node.Cluster.CloudLBEmptyType = "A"
+	}
+	return node
+}
+
+func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (updatedNode Node, err error) {
+	for _, ip := range clusterLBConfig.ApiIntLBIPs {
+		node.Cluster.APIIntLBIPs = append(node.Cluster.APIIntLBIPs, ip.String())
+	}
+	for _, ip := range clusterLBConfig.ApiLBIPs {
+		node.Cluster.APILBIPs = append(node.Cluster.APILBIPs, ip.String())
+	}
+	for _, ip := range clusterLBConfig.IngressLBIPs {
+		node.Cluster.IngressLBIPs = append(node.Cluster.IngressLBIPs, ip.String())
+	}
+	node.Cluster.CloudLBRecordType = "A"
+	node.Cluster.CloudLBEmptyType = "AAAA"
+	if len(clusterLBConfig.ApiIntLBIPs) > 0 && clusterLBConfig.ApiIntLBIPs[0].To4() == nil {
+		node.Cluster.CloudLBRecordType = "AAAA"
+		node.Cluster.CloudLBEmptyType = "A"
+	}
+	return node, nil
 }
