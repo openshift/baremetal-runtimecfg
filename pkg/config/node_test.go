@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -137,6 +138,136 @@ var _ = Describe("getNodePeersForIpStack", func() {
 		res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{}, testMachineNetworkV4)
 		Expect(res).To(Equal(""))
 		Expect(err.Error()).To(Equal("for node testNode requested NodeIP detection with empty filterIP list. Cannot detect IP stack"))
+	})
+})
+
+// Following needed for cloud LB IP tests
+var (
+	testKubeconfigPath    = "/test/path/kubeconfig"
+	testClusterConfigPath = "/test/path/clusterConfig"
+	testResolvConfPath    = "/test/path/resolvConf"
+	testApiLBIPv4         = net.ParseIP("192.168.0.111")
+	testApiIntLBIPv4      = net.ParseIP("10.10.10.20")
+	testIngressOneIPv4    = net.ParseIP("192.168.20.140")
+	testIngressTwoIPv4    = net.ParseIP("10.10.10.40")
+	testClusterLBConfig   = ClusterLBConfig{
+		ApiLBIPs:     []net.IP{testApiLBIPv4},
+		ApiIntLBIPs:  []net.IP{testApiIntLBIPv4},
+		IngressLBIPs: []net.IP{testIngressOneIPv4, testIngressTwoIPv4}}
+	expectedApiLBIPv4      = "192.168.0.111"
+	expectedApiIntLBIPv4   = "10.10.10.20"
+	expectedIngressOneIPv4 = "192.168.20.140"
+	expectedIngressTwoIPv4 = "10.10.10.40"
+
+	emptyLBIPs = []net.IP{}
+)
+
+var _ = Describe("PopulateCloudLBIPAddresses", func() {
+	Context("for IPV4 Cloud LB IPs", func() {
+		Context("with multiple Ingress LB IPs", func() {
+			It("matches IPv4 API and Ingress LB IPs", func() {
+				newNode := Node{}
+				newNode, err := PopulateCloudLBIPAddresses(testClusterLBConfig, newNode)
+				Expect(newNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv4))
+				Expect(newNode.Cluster.IngressLBIPs[1]).To(Equal(expectedIngressTwoIPv4))
+				Expect(newNode.Cluster.CloudLBRecordType).To(Equal("A"))
+				Expect(err).To(BeNil())
+			})
+			It("handles Empty API LB IPs", func() {
+				newNode := Node{}
+				// Empty API LB IP
+				emptyApiLBIPLBConfig := ClusterLBConfig{
+					ApiLBIPs:     []net.IP{},
+					ApiIntLBIPs:  []net.IP{testApiIntLBIPv4},
+					IngressLBIPs: []net.IP{testIngressOneIPv4}}
+				newNode, err := PopulateCloudLBIPAddresses(emptyApiLBIPLBConfig, newNode)
+				Expect(len(newNode.Cluster.APILBIPs)).To(Equal(len(emptyLBIPs)))
+				Expect(newNode.Cluster.APIIntLBIPs[0]).To(Equal(expectedApiIntLBIPv4))
+				Expect(newNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv4))
+				Expect(newNode.Cluster.CloudLBRecordType).To(Equal("A"))
+				Expect(err).To(BeNil())
+			})
+			It("handles Empty API Int LB IPs", func() {
+				newNode := Node{}
+				// Empty API-Int LB IP
+				emptyApiIntLBIPLBConfig := ClusterLBConfig{
+					ApiLBIPs:     []net.IP{testApiLBIPv4},
+					ApiIntLBIPs:  []net.IP{},
+					IngressLBIPs: []net.IP{testIngressOneIPv4}}
+				newNode, err := PopulateCloudLBIPAddresses(emptyApiIntLBIPLBConfig, newNode)
+				Expect(newNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv4))
+				Expect(len(newNode.Cluster.APIIntLBIPs)).To(Equal(len(emptyLBIPs)))
+				Expect(newNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv4))
+				Expect(newNode.Cluster.CloudLBRecordType).To(Equal("A"))
+				Expect(err).To(BeNil())
+			})
+			It("handles Empty Ingress LB IPs", func() {
+				newNode := Node{}
+				// Empty Ingress LB IP
+				emptyIngressLBIPLBConfig := ClusterLBConfig{
+					ApiLBIPs:     []net.IP{testApiLBIPv4},
+					ApiIntLBIPs:  []net.IP{testApiIntLBIPv4},
+					IngressLBIPs: []net.IP{}}
+				newNode, err := PopulateCloudLBIPAddresses(emptyIngressLBIPLBConfig, newNode)
+				Expect(newNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv4))
+				Expect(newNode.Cluster.APIIntLBIPs[0]).To(Equal(expectedApiIntLBIPv4))
+				Expect(len(newNode.Cluster.IngressLBIPs)).To(Equal(len(emptyLBIPs)))
+				Expect(newNode.Cluster.CloudLBRecordType).To(Equal("A"))
+				Expect(err).To(BeNil())
+			})
+			It("handles Empty All LB IPs", func() {
+				newNode := Node{}
+				// Empty All LB IPs
+				emptyAllLBIPLBConfig := ClusterLBConfig{
+					ApiLBIPs:     []net.IP{},
+					ApiIntLBIPs:  []net.IP{},
+					IngressLBIPs: []net.IP{}}
+				newNode, err := PopulateCloudLBIPAddresses(emptyAllLBIPLBConfig, newNode)
+				Expect(len(newNode.Cluster.APILBIPs)).To(Equal(len(emptyLBIPs)))
+				Expect(len(newNode.Cluster.APIIntLBIPs)).To(Equal(len(emptyLBIPs)))
+				Expect(len(newNode.Cluster.IngressLBIPs)).To(Equal(len(emptyLBIPs)))
+				Expect(newNode.Cluster.CloudLBRecordType).To(Equal("A"))
+				Expect(err).To(BeNil())
+			})
+		})
+	})
+})
+
+var _ = Describe("updateNodewithCloudLBIPs", func() {
+	Context("for IPV4 Cloud LB IPs", func() {
+		Context("with one LB IP per Node", func() {
+			It("matches IPv4 API and Ingress LB IPs", func() {
+				updateNode := Node{}
+				updateNode = updateNodewithCloudLBIPs(testApiLBIPv4, testApiIntLBIPv4, testIngressOneIPv4, updateNode)
+				Expect(updateNode.Cluster.APIIntLBIPs[0]).To(Equal(expectedApiIntLBIPv4))
+				Expect(updateNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv4))
+				Expect(updateNode.Cluster.CloudLBRecordType).To(Equal("A"))
+			})
+			It("handles nil API LB IP", func() {
+				updateNode := Node{}
+				updateNode = updateNodewithCloudLBIPs(nil, testApiIntLBIPv4, testIngressOneIPv4, updateNode)
+				Expect(len(updateNode.Cluster.APILBIPs)).To(Equal(0))
+				Expect(updateNode.Cluster.APIIntLBIPs[0]).To(Equal(expectedApiIntLBIPv4))
+				Expect(updateNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv4))
+				Expect(updateNode.Cluster.CloudLBRecordType).To(Equal("A"))
+			})
+			It("handles nil API-Int LB IP", func() {
+				updateNode := Node{}
+				updateNode = updateNodewithCloudLBIPs(testApiLBIPv4, nil, testIngressOneIPv4, updateNode)
+				Expect(updateNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv4))
+				Expect(len(updateNode.Cluster.APIIntLBIPs)).To(Equal(0))
+				Expect(updateNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv4))
+				Expect(updateNode.Cluster.CloudLBRecordType).To(Equal("A"))
+			})
+			It("handles nil API and Ingress LBs IP", func() {
+				updateNode := Node{}
+				updateNode = updateNodewithCloudLBIPs(nil, testApiIntLBIPv4, nil, updateNode)
+				Expect(updateNode.Cluster.APIIntLBIPs[0]).To(Equal(expectedApiIntLBIPv4))
+				Expect(len(updateNode.Cluster.APILBIPs)).To(Equal(0))
+				Expect(len(updateNode.Cluster.IngressLBIPs)).To(Equal(0))
+				Expect(updateNode.Cluster.CloudLBRecordType).To(Equal("A"))
+			})
+		})
 	})
 })
 

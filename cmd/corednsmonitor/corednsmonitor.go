@@ -55,8 +55,20 @@ func main() {
 			if err != nil {
 				return err
 			}
+			cloudExtLBIPs, err := cmd.Flags().GetIPSlice("cloud-ext-lb-ips")
+			if err != nil {
+				cloudExtLBIPs = []net.IP{}
+			}
+			cloudIntLBIPs, err := cmd.Flags().GetIPSlice("cloud-int-lb-ips")
+			if err != nil {
+				cloudIntLBIPs = []net.IP{}
+			}
+			cloudIngressLBIPs, err := cmd.Flags().GetIPSlice("cloud-ingress-lb-ips")
+			if err != nil {
+				cloudIngressLBIPs = []net.IP{}
+			}
 
-			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, checkInterval)
+			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, checkInterval, cloudExtLBIPs, cloudIntLBIPs, cloudIngressLBIPs)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")

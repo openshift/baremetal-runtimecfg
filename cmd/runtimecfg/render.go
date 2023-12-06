@@ -33,6 +33,9 @@ func init() {
 	renderCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen at")
 	renderCmd.Flags().Uint16("stat-port", 29445, "Port where the HAProxy stats API will listen at")
 	renderCmd.Flags().StringP("resolvconf-path", "r", "/etc/resolv.conf", "Optional path to a resolv.conf file to use to get upstream DNS servers")
+	renderCmd.Flags().IPSlice("cloud-ext-lb-ips", nil, "IP Addresses of Cloud External Load Balancers for OpenShift API")
+	renderCmd.Flags().IPSlice("cloud-int-lb-ips", nil, "IP Addresses of Cloud Internal Load Balancers for OpenShift Internal API")
+	renderCmd.Flags().IPSlice("cloud-ingress-lb-ips", nil, "IP Addresses of Cloud Ingress Load Balancers")
 	rootCmd.AddCommand(renderCmd)
 }
 
@@ -88,7 +91,21 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort)
+
+	apiLBIPs, err := cmd.Flags().GetIPSlice("cloud-ext-lb-ips")
+	if err != nil {
+		apiLBIPs = []net.IP{}
+	}
+	apiIntLBIPs, err := cmd.Flags().GetIPSlice("cloud-int-lb-ips")
+	if err != nil {
+		apiIntLBIPs = []net.IP{}
+	}
+	ingressLBIPs, err := cmd.Flags().GetIPSlice("cloud-ingress-lb-ips")
+	if err != nil {
+		ingressLBIPs = []net.IP{}
+	}
+	clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
+	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig)
 	if err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ func DnsmasqWatch(kubeconfigPath, templatePath, cfgPath string, apiVips []net.IP
 			return nil
 		default:
 			// We only care about the api vip and cluster domain here
-			config, err := config.GetConfig(kubeconfigPath, "", "/etc/resolv.conf", apiVips, apiVips, 0, 0, 0)
+			config, err := config.GetConfig(kubeconfigPath, "", "/etc/resolv.conf", apiVips, apiVips, 0, 0, 0, config.ClusterLBConfig{})
 			if err != nil {
 				return err
 			}
