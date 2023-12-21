@@ -1,10 +1,10 @@
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.15 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.20-openshift-4.16 AS builder
 WORKDIR /go/src/github.com/openshift/baremetal-runtimecfg
 COPY . .
 RUN mkdir build
 RUN GO111MODULE=on go build --mod=vendor -o build ./cmd/...
 
-FROM registry.ci.openshift.org/ocp/4.15:base
+FROM registry.ci.openshift.org/ocp/4.16:base-rhel9
 
 RUN yum install -y dhclient diffutils && yum clean all
 
