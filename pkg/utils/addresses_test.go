@@ -31,8 +31,8 @@ var eth1 = &netlink.Device{
 	},
 }
 
-func maybeAddAddress(addrMap map[netlink.Link][]netlink.Addr, af AddressFilter, link netlink.Link, addrStr string, deprecated bool) {
-	addr, err := netlink.ParseAddr(addrStr)
+func maybeAddAddress(addrMap map[netlink.Link][]netlink.Addr, af AddressFilter, link netlink.Link, addrStr string, deprecated bool, label string) {
+	addr, err := netlink.ParseAddr(addrStr + " " + label)
 	if err != nil {
 		panic(fmt.Sprintf("bad address string %q in test case", addrStr))
 	}
@@ -73,12 +73,13 @@ func maybeAddRoute(routeMap map[int][]netlink.Route, rf RouteFilter, link netlin
 }
 
 func addIPv4Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
-	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false)
-	maybeAddAddress(addrs, af, lo, "::1/128", false)
-	maybeAddAddress(addrs, af, eth0, "10.0.0.5/24", false)
-	maybeAddAddress(addrs, af, eth0, "169.254.10.10/16", false)
-	maybeAddAddress(addrs, af, eth0, "10.0.0.100/24", false)
-	maybeAddAddress(addrs, af, eth1, "192.168.1.2/24", false)
+	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false, "")
+	maybeAddAddress(addrs, af, lo, "::1/128", false, "")
+	maybeAddAddress(addrs, af, eth0, "10.0.0.4/24", false, "eip")
+	maybeAddAddress(addrs, af, eth0, "10.0.0.5/24", false, "")
+	maybeAddAddress(addrs, af, eth0, "169.254.10.10/16", false, "")
+	maybeAddAddress(addrs, af, eth0, "10.0.0.100/24", false, "")
+	maybeAddAddress(addrs, af, eth1, "192.168.1.2/24", false, "")
 }
 
 func addIPv4Routes(routes map[int][]netlink.Route, rf RouteFilter) {
@@ -94,15 +95,15 @@ func addIPv4RoutesDefaultEth1(routes map[int][]netlink.Route, rf RouteFilter) {
 }
 
 func addIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
-	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false)
-	maybeAddAddress(addrs, af, lo, "::1/128", false)
-	maybeAddAddress(addrs, af, eth0, "fd00::5/64", false)
-	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false)
-	maybeAddAddress(addrs, af, eth0, "::ffff:192.168.1.160/64", false)
-	maybeAddAddress(addrs, af, eth1, "fd69::2/125", false)
-	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true)
-	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true)
-	maybeAddAddress(addrs, af, eth1, "fd01::5/64", false)
+	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false, "")
+	maybeAddAddress(addrs, af, lo, "::1/128", false, "")
+	maybeAddAddress(addrs, af, eth0, "fd00::5/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "::ffff:192.168.1.160/64", false, "")
+	maybeAddAddress(addrs, af, eth1, "fd69::2/125", false, "")
+	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true, "")
+	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true, "")
+	maybeAddAddress(addrs, af, eth1, "fd01::5/64", false, "")
 }
 
 func addIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
@@ -113,7 +114,7 @@ func addIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
 }
 
 func addIPv6AddrsOVN(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
-	maybeAddAddress(addrs, af, eth0, "fd69::2/125", false)
+	maybeAddAddress(addrs, af, eth0, "fd69::2/125", false, "")
 }
 
 func addIPv6RoutesWithOVN(routes map[int][]netlink.Route, rf RouteFilter) {
@@ -122,13 +123,13 @@ func addIPv6RoutesWithOVN(routes map[int][]netlink.Route, rf RouteFilter) {
 }
 
 func addOverlappingIPv6Addrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
-	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false)
-	maybeAddAddress(addrs, af, lo, "::1/128", false)
-	maybeAddAddress(addrs, af, eth0, "fd00::f05/120", false)
-	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false)
-	maybeAddAddress(addrs, af, eth1, "fd00::3/120", true)
-	maybeAddAddress(addrs, af, eth1, "fd00::4/120", true)
-	maybeAddAddress(addrs, af, eth1, "fd00::5/120", false)
+	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false, "")
+	maybeAddAddress(addrs, af, lo, "::1/128", false, "")
+	maybeAddAddress(addrs, af, eth0, "fd00::f05/120", false, "")
+	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false, "")
+	maybeAddAddress(addrs, af, eth1, "fd00::3/120", true, "")
+	maybeAddAddress(addrs, af, eth1, "fd00::4/120", true, "")
+	maybeAddAddress(addrs, af, eth1, "fd00::5/120", false, "")
 }
 
 func addOverlappingIPv6Routes(routes map[int][]netlink.Route, rf RouteFilter) {
@@ -167,6 +168,7 @@ func addDummyAddrs(addrs map[netlink.Link][]netlink.Addr, af AddressFilter) {
 			},
 			fmt.Sprintf("1.2.3.%d/24", i),
 			false,
+			"",
 		)
 	}
 }
@@ -226,15 +228,15 @@ func dualStackAddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error)
 
 func ipv6AddrMapWithGlobalUnicast(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
 	addrs := make(map[netlink.Link][]netlink.Addr)
-	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false)
-	maybeAddAddress(addrs, af, lo, "::1/128", false)
-	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false)
-	maybeAddAddress(addrs, af, eth0, "fd00::5/64", false)
-	maybeAddAddress(addrs, af, eth0, "fe00::5/64", false)
-	maybeAddAddress(addrs, af, eth0, "2000::2/64", false)
-	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true)
-	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true)
-	maybeAddAddress(addrs, af, eth1, "fd01::5/64", false)
+	maybeAddAddress(addrs, af, lo, "127.0.0.1/8", false, "")
+	maybeAddAddress(addrs, af, lo, "::1/128", false, "")
+	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "fd00::5/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "fe00::5/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "2000::2/64", false, "")
+	maybeAddAddress(addrs, af, eth1, "fd01::3/64", true, "")
+	maybeAddAddress(addrs, af, eth1, "fd01::4/64", true, "")
+	maybeAddAddress(addrs, af, eth1, "fd01::5/64", false, "")
 	return addrs, nil
 }
 
