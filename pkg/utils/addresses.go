@@ -97,6 +97,11 @@ func ValidNodeAddress(address netlink.Addr) bool {
 		return false
 	}
 
+	// Ignore egress IPs
+	if strings.Contains(address.Label, "eip") {
+		return false
+	}
+
 	return true
 }
 
