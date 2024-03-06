@@ -308,7 +308,7 @@ func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, erro
 }
 
 func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwork string) (string, error) {
-	log.Infof("Searching for Node IP of %s. Using '%s' as machine network. Filtering out VIPs '%s'.", node.Name, machineNetwork, filterIps)
+	log.Debugf("Searching for Node IP of %s. Using '%s' as machine network. Filtering out VIPs '%s'.", node.Name, machineNetwork, filterIps)
 
 	if len(filterIps) == 0 {
 		return "", fmt.Errorf("for node %s requested NodeIP detection with empty filterIP list. Cannot detect IP stack", node.Name)
@@ -337,12 +337,12 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 		if address.Type == v1.NodeInternalIP {
 			if (utils.IsIPv4(net.ParseIP(address.Address)) && isFilterV4) || (utils.IsIPv6(net.ParseIP(address.Address)) && isFilterV6) {
 				addr = address.Address
-				log.Infof("For node %s selected peer address %s using NodeInternalIP", node.Name, addr)
+				log.Debugf("For node %s selected peer address %s using NodeInternalIP", node.Name, addr)
 			}
 		}
 	}
 	if addr == "" {
-		log.Infof("For node %s can't find address using NodeInternalIP. Fallback to OVN annotation.", node.Name)
+		log.Debugf("For node %s can't find address using NodeInternalIP. Fallback to OVN annotation.", node.Name)
 
 		var ovnHostAddresses []string
 		if err := json.Unmarshal([]byte(node.Annotations["k8s.ovn.org/host-addresses"]), &ovnHostAddresses); err != nil {
@@ -370,7 +370,7 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 		if suggestedIp != "" {
 			for _, hostAddr := range ovnHostAddresses {
 				if suggestedIp == hostAddr {
-					log.Infof("For node %s selected peer address %s using OVN annotations and suggestion.", node.Name, suggestedIp)
+					log.Debugf("For node %s selected peer address %s using OVN annotations and suggestion.", node.Name, suggestedIp)
 					return suggestedIp, nil
 				}
 			}
@@ -380,24 +380,24 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 		for _, hostAddr := range ovnHostAddresses {
 			for _, filterIp := range filterIps {
 				if hostAddr == filterIp {
-					log.Infof("Address %s is VIP. Skipping.", hostAddr)
+					log.Debugf("Address %s is VIP. Skipping.", hostAddr)
 					continue AddrList
 				}
 			}
 
 			if (utils.IsIPv4(net.ParseIP(hostAddr)) && !isFilterV4) || (utils.IsIPv6(net.ParseIP(hostAddr)) && !isFilterV6) {
-				log.Infof("Address %s doesn't match requested IP stack. Skipping.", hostAddr)
+				log.Debugf("Address %s doesn't match requested IP stack. Skipping.", hostAddr)
 				continue
 			}
 
 			match, err := utils.IpInCidr(hostAddr, machineNetwork)
 			if err != nil {
-				log.Infof("Address '%s' and subnet '%s' couldn't be parsed. Skipping.", hostAddr, machineNetwork)
+				log.Warnf("Address '%s' and subnet '%s' couldn't be parsed. Skipping.", hostAddr, machineNetwork)
 				continue
 			}
 			if match {
 				addr = hostAddr
-				log.Infof("For node %s selected peer address %s using OVN annotations.", node.Name, addr)
+				log.Debugf("For node %s selected peer address %s using OVN annotations.", node.Name, addr)
 				break AddrList
 			}
 		}
