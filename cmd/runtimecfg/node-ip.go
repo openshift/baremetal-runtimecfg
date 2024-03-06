@@ -190,7 +190,7 @@ func writeToFile(path string, data string) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("Opening path %s", path)
+	log.Debugf("Opening path %s", path)
 	fileToCreate, err := os.Create(path)
 	if err != nil {
 		return err
@@ -223,8 +223,6 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 	// for the next loop interation.
 	timerLoop := 1
 
-	// Enable debug logging in utils package
-	utils.SetDebugLogLevel()
 	ipFilterFunc := utils.ValidNodeAddress
 	for {
 		timerLoop = timerLoop * addSecondsToSuitableIPsLoop
@@ -286,7 +284,7 @@ func parseIPs(args []string) ([]net.IP, error) {
 		if ips[i] == nil {
 			return nil, fmt.Errorf("Failed to parse IP address %s", arg)
 		}
-		log.Infof("Parsed Virtual IP %s", ips[i])
+		log.Debugf("Parsed Virtual IP %s", ips[i])
 	}
 	return ips, nil
 }
