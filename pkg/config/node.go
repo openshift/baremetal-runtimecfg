@@ -454,7 +454,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 		} else {
 			ingressVip = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort, false)
 		if err != nil {
 			return Node{}, err
 		}
@@ -464,7 +464,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 	return nodes[0], nil
 }
 
-func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, cloudPlatform bool) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
 		return node, err
@@ -507,6 +507,9 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 			node.Cluster.IngressVIPRecordType = "AAAA"
 			node.Cluster.IngressVIPEmptyType = "A"
 		}
+	}
+	if cloudPlatform {
+		return node, nil
 	}
 	vipIface, nonVipAddr, err := GetVRRPConfig(apiVip, ingressVip)
 	if err != nil {
@@ -749,7 +752,7 @@ func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPa
 		} else {
 			ingressIP = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0, true)
 		if err != nil {
 			return Node{}, err
 		}
