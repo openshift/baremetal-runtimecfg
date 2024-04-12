@@ -162,6 +162,17 @@ func getClusterConfigMasterAmount(configPath string) (amount *int64, err error) 
 	return ic.ControlPlane.Replicas, nil
 }
 
+func isOnPremPlatform(configPath string) (bool, error) {
+	ic, err := getClusterConfigMapInstallConfig(configPath)
+	if err != nil {
+		return true, err
+	}
+	if ic.Platform.BareMetal != nil || ic.Platform.VSphere != nil || ic.Platform.OpenStack != nil || ic.Platform.Ovirt != nil || ic.Platform.Nutanix != nil {
+		return true, nil
+	}
+	return false, nil
+}
+
 func getClusterConfigMapInstallConfig(configPath string) (installConfig types.InstallConfig, err error) {
 	yamlFile, err := ioutil.ReadFile(configPath)
 	if err != nil {
@@ -508,6 +519,11 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 			node.Cluster.IngressVIPEmptyType = "A"
 		}
 	}
+	// Rest of the Node config will not be available on Cloud platforms.
+	if onPremPlatform, err := isOnPremPlatform(clusterConfigPath); !onPremPlatform {
+		return node, err
+	}
+
 	vipIface, nonVipAddr, err := GetVRRPConfig(apiVip, ingressVip)
 	if err != nil {
 		return node, err
