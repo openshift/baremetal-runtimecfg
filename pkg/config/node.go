@@ -30,8 +30,6 @@ const (
 	labelNodeRolePrefix = "node-role.kubernetes.io/"
 )
 
-var log = logrus.New()
-
 type NodeAddress struct {
 	Address string
 	Name    string
@@ -316,8 +314,9 @@ func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, erro
 		machineNetwork, err = utils.GetLocalCIDRByIP(vips[0])
 
 		if err == nil {
+			debug := utils.GetNodeIPDebugStatus(clientset)
 			for _, node := range nodes.Items {
-				addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork)
+				addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork, debug)
 				if err != nil {
 					log.WithFields(logrus.Fields{
 						"err": err,
@@ -353,7 +352,15 @@ func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, erro
 	return ingressConfig, nil
 }
 
-func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwork string) (string, error) {
+func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwork string, debug bool) (string, error) {
+	if debug {
+		SetDebugLogLevel()
+		utils.SetDebugLogLevel()
+	} else {
+		SetInfoLogLevel()
+		utils.SetInfoLogLevel()
+	}
+
 	log.Debugf("Searching for Node IP of %s. Using '%s' as machine network. Filtering out VIPs '%s'.", node.Name, machineNetwork, filterIps)
 
 	if len(filterIps) == 0 {
@@ -649,8 +656,9 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	// where VIPs do not belong to the L2 of the node, yet they work properly.
 	machineNetwork, err := utils.GetLocalCIDRByIP(vips[0].String())
 	if err == nil {
+		debug := utils.GetNodeIPDebugStatus(clientset)
 		for _, node := range nodes.Items {
-			masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork)
+			masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork, debug)
 			if err != nil {
 				log.WithFields(logrus.Fields{
 					"err": err,
