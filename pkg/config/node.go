@@ -441,7 +441,7 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 // statPort: The port on which the haproxy stats endpoint listens.
 // clusterLBConfig: A struct containing IPs for API, API-Int and Ingress LBs
 func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, clusterLBConfig ClusterLBConfig) (node Node, err error) {
-	if len(clusterLBConfig.ApiIntLBIPs) > 0 {
+	if onPremPlatform, _ := isOnPremPlatform(clusterConfigPath); !onPremPlatform {
 		// Cloud Platforms with cloud LBs but no Cloud DNS
 		return getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath, clusterLBConfig)
 	}
@@ -769,14 +769,17 @@ func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPa
 		if err != nil {
 			return Node{}, err
 		}
-		newNode = updateNodewithCloudLBIPs(apiLBIP, apiIntLBIP, ingressIP, newNode)
+		newNode, err = updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP, resolvConfPath, newNode)
+		if err != nil {
+			return Node{}, err
+		}
 		nodes = append(nodes, newNode)
 	}
 	nodes[0].Configs = &nodes
 	return nodes[0], nil
 }
 
-func updateNodewithCloudLBIPs(apiLBIP, apiIntLBIP, ingressIP net.IP, node Node) Node {
+func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPath string, node Node) (updatedNode Node, err error) {
 	var validLBIP net.IP
 	if apiIntLBIP != nil {
 		validLBIP = apiIntLBIP
@@ -797,7 +800,24 @@ func updateNodewithCloudLBIPs(apiLBIP, apiIntLBIP, ingressIP net.IP, node Node) 
 		node.Cluster.CloudLBRecordType = "AAAA"
 		node.Cluster.CloudLBEmptyType = "A"
 	}
-	return node
+	resolvConfUpstreams, err := getDNSUpstreams(resolvConfPath)
+	if err != nil {
+		return node, err
+	}
+	// Extract only useful upstream addresses
+	node.DNSUpstreams = make([]string, 0)
+	for _, upstream := range resolvConfUpstreams {
+		if upstream != "127.0.0.1" && upstream != "::1" {
+			log.Infof("Adding %s as DNS Upstream", upstream)
+			node.DNSUpstreams = append(node.DNSUpstreams, upstream)
+		}
+	}
+	// Having no DNS Upstream servers is invalid. Return error so init
+	// container can retry.
+	if len(node.DNSUpstreams) < 1 {
+		return node, errors.New("No upstream DNS servers found")
+	}
+	return node, nil
 }
 
 func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (updatedNode Node, err error) {
