@@ -646,7 +646,7 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	sort.Slice(backends, func(i, j int) bool {
 		return backends[i].Address < backends[j].Address
 	})
-	return backends, err
+	return backends, nil
 }
 
 func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP) (ApiLBConfig, error) {
