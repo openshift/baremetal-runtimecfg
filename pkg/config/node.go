@@ -327,7 +327,8 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 	//
 	// We will use here the following sources:
 	//   1) Node.Status.Addresses list
-	//   2) Node annotation "k8s.ovn.org/host-addresses" in combination with Machine Networks
+	//   2) Node annotation "k8s.ovn.org/host-cidrs" in combination with Machine Networks
+	//   3) Deprecated node annotation "k8s.ovn.org/host-addresses" in combination with Machine Networks
 	//
 	// If none of those returns a conclusive result, we don't return an IP for this node. This is
 	// not a desired outcome, but can be extended in the future if desired.
@@ -345,10 +346,24 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 		log.Debugf("For node %s can't find address using NodeInternalIP. Fallback to OVN annotation.", node.Name)
 
 		var ovnHostAddresses []string
-		if err := json.Unmarshal([]byte(node.Annotations["k8s.ovn.org/host-addresses"]), &ovnHostAddresses); err != nil {
+		var tmp []string
+
+		err := json.Unmarshal([]byte(node.Annotations["k8s.ovn.org/host-cidrs"]), &tmp)
+		if err == nil {
+			for _, cidr := range tmp {
+				ip := strings.Split(cidr, "/")[0]
+				ovnHostAddresses = append(ovnHostAddresses, ip)
+			}
+		} else {
 			log.WithFields(logrus.Fields{
 				"err": err,
-			}).Warnf("Couldn't unmarshall OVN annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
+			}).Warnf("Couldn't unmarshall OVN HostCidrs annotations: '%s'. Trying HostAddresses.", node.Annotations["k8s.ovn.org/host-cidrs"])
+
+			if err := json.Unmarshal([]byte(node.Annotations["k8s.ovn.org/host-addresses"]), &ovnHostAddresses); err != nil {
+				log.WithFields(logrus.Fields{
+					"err": err,
+				}).Warnf("Couldn't unmarshall OVN HostAddresses annotations: '%s'. Skipping.", node.Annotations["k8s.ovn.org/host-addresses"])
+			}
 		}
 
 		// Here we need to guarantee that local Node IP (i.e. NonVirtualIP) is present somewhere
