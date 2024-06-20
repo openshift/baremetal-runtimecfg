@@ -15,6 +15,10 @@ var (
 		"k8s.ovn.org/host-addresses": "[\"192.168.1.102\",\"192.168.1.99\",\"192.168.1.101\",\"fd00::101\",\"2001:db8::49a\",\"fd00::102\",\"fd00::5\",\"fd69::2\"]",
 	}
 
+	testOvnHostCidrsAnnotation = map[string]string{
+		"k8s.ovn.org/host-cidrs": "[\"192.168.1.102/24\",\"192.168.1.99/24\",\"192.168.1.101/24\",\"fd00::101/128\",\"2001:db8::49a/64\",\"fd00::102/128\",\"fd00::5/128\",\"fd69::2/128\"]",
+	}
+
 	testNodeDualStack1 = v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "testNode"},
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
@@ -23,7 +27,6 @@ var (
 			{Type: "ExternalIP", Address: "172.16.1.99"},
 		}}}
 	testNodeDualStack2 = v1.Node{
-
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
 			{Type: "InternalIP", Address: "192.168.1.99"},
 			{Type: "ExternalIP", Address: "172.16.1.99"},
@@ -39,6 +42,23 @@ var (
 			Annotations: testOvnHostAddressesAnnotation,
 		},
 	}
+	testNodeDualStack4 = v1.Node{
+		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
+			{Type: "InternalIP", Address: "192.168.1.99"},
+			{Type: "ExternalIP", Address: "172.16.1.99"},
+		}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "testNode",
+			Annotations: testOvnHostCidrsAnnotation,
+		},
+	}
+	testNodeDualStack5 = v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "testNode",
+			Annotations: testOvnHostCidrsAnnotation,
+		},
+	}
+
 	testNodeSingleStackV4 = v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "testNode"},
 		Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
@@ -75,7 +95,7 @@ var _ = Describe("getNodePeersForIpStack", func() {
 			})
 		})
 
-		Context("with address only in OVN annotation", func() {
+		Context("with address only in OVN HostAddresses annotation", func() {
 			It("matches an IPv4 VIP", func() {
 				res, err := getNodeIpForRequestedIpStack(testNodeDualStack3, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
@@ -88,7 +108,20 @@ var _ = Describe("getNodePeersForIpStack", func() {
 			})
 		})
 
-		Context("with address in status and OVN annotation", func() {
+		Context("with address only in OVN HostCidrs annotation", func() {
+			It("matches an IPv4 VIP", func() {
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack5, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
+				Expect(res).To(Equal("192.168.1.99"))
+				Expect(err).To(BeNil())
+			})
+			It("matches an IPv6 VIP", func() {
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack5, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
+				Expect(res).To(Equal("fd00::5"))
+				Expect(err).To(BeNil())
+			})
+		})
+
+		Context("with address in status and OVN HostAddresses annotation", func() {
 			It("matches an IPv4 VIP", func() {
 				res, err := getNodeIpForRequestedIpStack(testNodeDualStack2, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
@@ -96,6 +129,19 @@ var _ = Describe("getNodePeersForIpStack", func() {
 			})
 			It("matches an IPv6 VIP", func() {
 				res, err := getNodeIpForRequestedIpStack(testNodeDualStack2, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
+				Expect(res).To(Equal("fd00::5"))
+				Expect(err).To(BeNil())
+			})
+		})
+
+		Context("with address in status and OVN HostCidrs annotation", func() {
+			It("matches an IPv4 VIP", func() {
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack4, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
+				Expect(res).To(Equal("192.168.1.99"))
+				Expect(err).To(BeNil())
+			})
+			It("matches an IPv6 VIP", func() {
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack4, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 				Expect(res).To(Equal("fd00::5"))
 				Expect(err).To(BeNil())
 			})
