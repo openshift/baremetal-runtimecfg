@@ -287,20 +287,44 @@ func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, erro
 		// by detecting which of the local interfaces belongs to the same subnet as requested VIP.
 		// This interface can be used to detect what was the original machine network as it contains
 		// the subnet mask that we need.
+		//
+		// In case there is no subnet containing a VIP on any of the available NICs we are counterintuitively
+		// selecting just a Node IP with the matching IP stack. This is a weird case in e.g. vSphere
+		// where VIPs do not belong to the L2 of the node, yet they work properly.
 		machineNetwork, err = utils.GetLocalCIDRByIP(vips[0])
-		if err != nil {
-			return ingressConfig, err
-		}
-	}
 
-	for _, node := range nodes.Items {
-		addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork)
-		if err != nil {
+		if err == nil {
+			for _, node := range nodes.Items {
+				addr, err := getNodeIpForRequestedIpStack(node, vips, machineNetwork)
+				if err != nil {
+					log.WithFields(logrus.Fields{
+						"err": err,
+					}).Warnf("For node %s could not retrieve node's IP. Ignoring", node.ObjectMeta.Name)
+				} else {
+					ingressConfig.Peers = append(ingressConfig.Peers, addr)
+				}
+			}
+		} else {
 			log.WithFields(logrus.Fields{
 				"err": err,
-			}).Warnf("For node %s could not retrieve node's IP. Ignoring", node.ObjectMeta.Name)
-		} else {
-			ingressConfig.Peers = append(ingressConfig.Peers, addr)
+			}).Errorf("Could not retrieve subnet for IP %s. Falling back to an IP of the matching IP stack", vips[0])
+
+			for _, node := range nodes.Items {
+				addr := ""
+				for _, address := range node.Status.Addresses {
+					if address.Type == v1.NodeInternalIP && utils.IsIPv6(net.ParseIP(address.Address)) == utils.IsIPv6(net.ParseIP(vips[0])) {
+						addr = address.Address
+						break
+					}
+				}
+				if addr != "" {
+					ingressConfig.Peers = append(ingressConfig.Peers, addr)
+				} else {
+					log.WithFields(logrus.Fields{
+						"err": err,
+					}).Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
+				}
+			}
 		}
 	}
 
@@ -587,29 +611,48 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	// by detecting which of the local interfaces belongs to the same subnet as requested VIP.
 	// This interface can be used to detect what was the original machine network as it contains
 	// the subnet mask that we need.
+	// In case there is no subnet containing a VIP on any of the available NICs we are counterintuitively
+	// selecting just a Node IP with the matching IP stack. This is a weird case in e.g. vSphere
+	// where VIPs do not belong to the L2 of the node, yet they work properly.
 	machineNetwork, err := utils.GetLocalCIDRByIP(vips[0].String())
-	if err != nil {
+	if err == nil {
+		for _, node := range nodes.Items {
+			masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork)
+			if err != nil {
+				log.WithFields(logrus.Fields{
+					"err": err,
+				}).Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
+			} else {
+				backends = append(backends, Backend{Host: node.ObjectMeta.Name, Address: masterIp})
+			}
+		}
+	} else {
 		log.WithFields(logrus.Fields{
 			"err": err,
-		}).Errorf("Could not retrieve subnet for IP %s", vips[0].String())
-		return []Backend{}, err
-	}
+		}).Errorf("Could not retrieve subnet for IP %s. Falling back to an IP of the matching IP stack", vips[0].String())
 
-	for _, node := range nodes.Items {
-		masterIp, err := getNodeIpForRequestedIpStack(node, utils.ConvertIpsToStrings(vips), machineNetwork)
-		if err != nil {
-			log.WithFields(logrus.Fields{
-				"err": err,
-			}).Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
-		} else {
-			backends = append(backends, Backend{Host: node.ObjectMeta.Name, Address: masterIp})
+		for _, node := range nodes.Items {
+			masterIp := ""
+			for _, address := range node.Status.Addresses {
+				if address.Type == v1.NodeInternalIP && utils.IsIPv6(net.ParseIP(address.Address)) == utils.IsIPv6(vips[0]) {
+					masterIp = address.Address
+					break
+				}
+			}
+			if masterIp != "" {
+				backends = append(backends, Backend{Host: node.ObjectMeta.Name, Address: masterIp})
+			} else {
+				log.WithFields(logrus.Fields{
+					"err": err,
+				}).Warnf("Could not retrieve node's IP for %s. Ignoring", node.ObjectMeta.Name)
+			}
 		}
 	}
 
 	sort.Slice(backends, func(i, j int) bool {
 		return backends[i].Address < backends[j].Address
 	})
-	return backends, err
+	return backends, nil
 }
 
 func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP) (ApiLBConfig, error) {
