@@ -418,24 +418,17 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			ruleExists, err := checkHAProxyFirewallRules(apiVips[0].String(), apiPort, lbPort)
 			if err != nil {
 				log.Error("Failed to check for haproxy firewall rule")
-			} else {
-				_, err := os.Stat(iptablesFilePath)
-				fileExists := !os.IsNotExist(err)
-				if ruleExists {
-					if !fileExists {
-						_, err := os.Create(iptablesFilePath)
-						if err != nil {
-							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to create file")
-						}
-					}
-				} else {
-					if fileExists {
-						err := os.Remove(iptablesFilePath)
-						if err != nil {
-							log.WithFields(logrus.Fields{"path": iptablesFilePath}).Error("Failed to remove file")
-						}
-					}
+			} else if ruleExists {
+				// if openfile returns a nil error then the file either already existed or has been created
+				fd, err := os.OpenFile(iptablesFilePath, os.O_CREATE, 0666)
+				if err != nil {
+					log.WithFields(logrus.Fields{"path": iptablesFilePath}).WithError(err).Error("Failed to open or create file")
+				} else if err := fd.Close(); err != nil {
+					log.WithFields(logrus.Fields{"path": iptablesFilePath}).WithError(err).Warn("Error closing file")
 				}
+			} else if err := os.RemoveAll(iptablesFilePath); err != nil {
+				// if the path doesn't exist then RemoveAll returns nil
+				log.WithFields(logrus.Fields{"path": iptablesFilePath}).WithError(err).Error("Failed to remove file")
 			}
 			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{})
 			if err != nil {
