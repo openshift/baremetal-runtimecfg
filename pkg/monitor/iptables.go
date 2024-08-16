@@ -113,12 +113,18 @@ func checkHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) (bool, err
 	if err != nil {
 		return false, err
 	}
-	preroutingExists, _ := ipt.Exists(table, "PREROUTING", ruleSpec...)
+	preroutingExists, err := ipt.Exists(table, "PREROUTING", ruleSpec...)
+	if err != nil {
+		return false, err
+	}
 
 	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback)
 	if err != nil {
 		return false, err
 	}
-	outputExists, _ := ipt.Exists(table, "OUTPUT", ruleSpec...)
+	outputExists, err := ipt.Exists(table, "OUTPUT", ruleSpec...)
+	if err != nil {
+		return false, err
+	}
 	return (preroutingExists && outputExists), nil
 }
