@@ -1,6 +1,6 @@
 module github.com/openshift/baremetal-runtimecfg
 
-go 1.22
+go 1.22.0
 
 require (
 	github.com/coreos/go-iptables v0.4.1
