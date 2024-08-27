@@ -18,7 +18,7 @@ import (
 const haproxyMasterSock = "/var/run/haproxy/haproxy-master.sock"
 const cfgChangeThreshold uint8 = 3
 const k8sHealthThresholdOn uint8 = 3
-const k8sHealthThresholdOff uint8 = 2
+const k8sHealthThresholdOff uint8 = 3
 
 var log = logrus.New()
 
