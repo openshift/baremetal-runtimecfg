@@ -22,7 +22,6 @@ import (
 )
 
 const kubeClientTimeout = 30 * time.Second
-const haproxyHealthPort = 9454
 
 func FletcherChecksum8(inp string) uint8 {
 	var ckA, ckB uint8
@@ -68,14 +67,19 @@ func IsKubernetesHealthy(port uint16) (bool, error) {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: transport}
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/haproxy_monitor", haproxyHealthPort))
+	resp, err := client.Get(fmt.Sprintf("https://localhost:%d/readyz", port))
 	if err != nil {
 		return false, err
 	}
 	defer client.CloseIdleConnections()
 	defer resp.Body.Close()
 
-	return resp.StatusCode == 200, nil
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	return string(body) == "ok", nil
 }
 
 func AlarmStabilization(cur_alrm bool, cur_defect bool, consecutive_ctr uint8, on_threshold uint8, off_threshold uint8) (bool, uint8) {
