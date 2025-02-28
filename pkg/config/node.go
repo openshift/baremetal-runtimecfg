@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"github.com/openshift/installer/pkg/types"
 )
@@ -55,6 +56,7 @@ type Cluster struct {
 	IngressLBIPs           []string
 	CloudLBRecordType      string
 	CloudLBEmptyType       string
+	PlatformType           string
 }
 
 type Backend struct {
@@ -160,7 +162,10 @@ func getClusterConfigMasterAmount(configPath string) (amount *int64, err error) 
 	return ic.ControlPlane.Replicas, nil
 }
 
-func isOnPremPlatform(configPath string) (bool, error) {
+func isOnPremPlatform(configPath string, platformType string) (bool, error) {
+	if platformType == string(configv1.GCPPlatformType) || platformType == string(configv1.AWSPlatformType) {
+		return false, nil
+	}
 	ic, err := getClusterConfigMapInstallConfig(configPath)
 	if err != nil {
 		return true, err
@@ -486,10 +491,14 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 // lbPort: The port on which haproxy listens.
 // statPort: The port on which the haproxy stats endpoint listens.
 // clusterLBConfig: A struct containing IPs for API, API-Int and Ingress LBs
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, clusterLBConfig ClusterLBConfig) (node Node, err error) {
-	if onPremPlatform, _ := isOnPremPlatform(clusterConfigPath); !onPremPlatform {
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, clusterLBConfig ClusterLBConfig, platformType string) (node Node, err error) {
+	onPremPlatform := true
+	if onPremPlatform, err = isOnPremPlatform(clusterConfigPath, platformType); err != nil {
+		return Node{}, err
+	}
+	if !onPremPlatform {
 		// Cloud Platforms with cloud LBs but no Cloud DNS
-		return getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath, clusterLBConfig)
+		return getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath, clusterLBConfig, platformType)
 	}
 	// On-prem platforms
 	vipCount := 0
@@ -511,7 +520,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 		} else {
 			ingressVip = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort, platformType)
 		if err != nil {
 			return Node{}, err
 		}
@@ -521,7 +530,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 	return nodes[0], nil
 }
 
-func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16) (node Node, err error) {
+func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, platformType string) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
 		return node, err
@@ -529,6 +538,7 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 
 	node.Cluster.Name = clusterName
 	node.Cluster.Domain = clusterDomain
+	node.Cluster.PlatformType = platformType
 
 	node.Cluster.PopulateVRIDs()
 
@@ -566,7 +576,8 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 		}
 	}
 	// Rest of the Node config will not be available on Cloud platforms.
-	if onPremPlatform, err := isOnPremPlatform(clusterConfigPath); !onPremPlatform {
+	onPremPlatform, err := isOnPremPlatform(clusterConfigPath, platformType)
+	if !onPremPlatform || err != nil {
 		return node, err
 	}
 
@@ -794,7 +805,7 @@ func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
 	}
 }
 
-func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath string, clusterLBConfig ClusterLBConfig) (node Node, err error) {
+func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath string, clusterLBConfig ClusterLBConfig, platformType string) (node Node, err error) {
 	var apiLBIP, apiIntLBIP, ingressIP net.IP
 	nodes := []Node{}
 
@@ -831,7 +842,7 @@ func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPa
 		} else {
 			ingressIP = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0, platformType)
 		if err != nil {
 			return Node{}, err
 		}
