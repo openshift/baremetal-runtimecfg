@@ -100,6 +100,7 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	// approach we should avoid asymetric configuration
 	if curConfig.EnableUnicast {
 		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 2 {
+			log.Warnf("Invalid keepalived.conf - number of backends must be at least 2 got %d", len(curConfig.LBConfig.Backends))
 			validConfig = false
 		}
 	}
