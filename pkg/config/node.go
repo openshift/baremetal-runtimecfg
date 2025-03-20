@@ -643,6 +643,22 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 		}).Info("Failed to get master Nodes list")
 		return []Backend{}, err
 	}
+	// When installing TNA clusters using assisted service, one of the master nodes acts as the bootstrap.
+	// So during the installation there will only be one master node, but we need two in order to configure keepalived.
+	// We cannot wait until the bootstrap finishes and becomes a master, because then no node will have the API vip.
+	// To circumvent that we will add the arbiter node to the list of nodes.
+	if len(nodes.Items) == 1 {
+		arbiters, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "node-role.kubernetes.io/arbiter=",
+		})
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"err": err,
+			}).Info("Failed to get arbiter Nodes list")
+			return []Backend{}, err
+		}
+		nodes.Items = append(nodes.Items, arbiters.Items...)
+	}
 	if len(vips) == 0 {
 		return []Backend{}, fmt.Errorf("Trying to build config using empty VIPs")
 	}
