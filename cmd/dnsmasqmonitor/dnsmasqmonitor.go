@@ -39,12 +39,18 @@ func main() {
 				return err
 			}
 
-			return monitor.DnsmasqWatch(args[0], args[1], args[2], apiVips, checkInterval)
+			platformType, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				platformType = ""
+			}
+
+			return monitor.DnsmasqWatch(args[0], args[1], args[2], apiVips, checkInterval, platformType)
 		},
 	}
 	rootCmd.Flags().Duration("check-interval", time.Second*30, "Time between coredns watch checks")
 	rootCmd.Flags().IP("api-vip", nil, "DEPRECATED: Virtual IP Address to reach the OpenShift API")
 	rootCmd.Flags().IPSlice("api-vips", nil, "Virtual IP Addresses to reach the OpenShift API")
+	rootCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
 	}

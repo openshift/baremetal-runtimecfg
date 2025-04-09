@@ -31,6 +31,7 @@ func init() {
 	displayCmd.Flags().IPSlice("cloud-ext-lb-ips", nil, "IP Addresses of Cloud External Load Balancers for OpenShift API")
 	displayCmd.Flags().IPSlice("cloud-int-lb-ips", nil, "IP Addresses of Cloud Internal Load Balancers for OpenShift API")
 	displayCmd.Flags().IPSlice("cloud-ingress-lb-ips", nil, "IP Addresses of Cloud Ingress Load Balancers")
+	displayCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
 	rootCmd.AddCommand(displayCmd)
 }
 
@@ -100,9 +101,14 @@ func runDisplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		ingressLBIPs = []net.IP{}
 	}
+	platformType, err := cmd.Flags().GetString("platform")
+	if err != nil {
+		platformType = ""
+	}
+
 	clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
 
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig)
+	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType)
 	if err != nil {
 		return err
 	}

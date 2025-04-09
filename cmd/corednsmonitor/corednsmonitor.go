@@ -67,8 +67,12 @@ func main() {
 			if err != nil {
 				cloudIngressLBIPs = []net.IP{}
 			}
+			platformType, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				platformType = ""
+			}
 
-			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, checkInterval, cloudExtLBIPs, cloudIntLBIPs, cloudIngressLBIPs)
+			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, checkInterval, cloudExtLBIPs, cloudIntLBIPs, cloudIngressLBIPs, platformType)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
@@ -80,6 +84,7 @@ func main() {
 	rootCmd.Flags().IPSlice("cloud-ext-lb-ips", nil, "IP Addresses of Cloud External Load Balancers for OpenShift API")
 	rootCmd.Flags().IPSlice("cloud-int-lb-ips", nil, "IP Addresses of Cloud Internal Load Balancers for OpenShift Internal API")
 	rootCmd.Flags().IPSlice("cloud-ingress-lb-ips", nil, "IP Addresses of Cloud Ingress Load Balancers")
+	rootCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
