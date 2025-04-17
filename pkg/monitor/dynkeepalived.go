@@ -291,7 +291,7 @@ func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
 	return nil
 }
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration, platformType string) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
@@ -356,7 +356,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{})
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{}, platformType)
 			if err != nil {
 				return err
 			}
@@ -431,7 +431,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				// if the path doesn't exist then RemoveAll returns nil
 				log.WithFields(logrus.Fields{"path": iptablesFilePath}).WithError(err).Error("Failed to remove file")
 			}
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{})
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{}, platformType)
 			if err != nil {
 				return err
 			}

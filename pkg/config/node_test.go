@@ -7,8 +7,13 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/openshift/installer/pkg/types"
+	"github.com/openshift/installer/pkg/types/baremetal"
+	"github.com/openshift/installer/pkg/types/gcp"
+	"github.com/openshift/installer/pkg/types/none"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -190,7 +195,7 @@ var _ = Describe("getNodePeersForIpStack", func() {
 	})
 })
 
-// Following needed for cloud LB IP tests
+// Following are needed for cloud LB IP tests
 var (
 	testKubeconfigPath    = "/test/path/kubeconfig"
 	testClusterConfigPath = "/test/path/clusterConfig"
@@ -337,6 +342,147 @@ func createTempResolvConf() {
 func deleteTempResolvConf() {
 	os.Remove("/tmp/resolvConf")
 }
+
+var (
+	installConfig = &types.InstallConfig{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: types.InstallConfigVersion,
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+		},
+		BaseDomain: "cluster.openshift.com",
+		Publish:    types.ExternalPublishingStrategy,
+	}
+	baremetalPlatform = baremetal.Platform{
+		LibvirtURI:                   "qemu+tcp://192.168.122.1/system",
+		ProvisioningNetworkInterface: "ens3",
+	}
+	gcpPlatform = gcp.Platform{
+		ProjectID: "test-project",
+		Region:    "us-east-1",
+	}
+	nonePlatform = none.Platform{}
+)
+
+func gcpInstallConfig() *types.InstallConfig {
+	installConfig.Platform = types.Platform{
+		GCP: &gcpPlatform,
+	}
+	return installConfig
+}
+
+func baremetalInstallConfig() *types.InstallConfig {
+	installConfig.Platform = types.Platform{
+		BareMetal: &baremetalPlatform,
+	}
+	return installConfig
+}
+
+func noneInstallConfig() *types.InstallConfig {
+	installConfig.Platform = types.Platform{
+		None: &nonePlatform,
+	}
+	return installConfig
+}
+
+func createTempInstallConfig(installConfig *types.InstallConfig) string {
+	icData, _ := yaml.Marshal(installConfig)
+
+	cm := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cluster-config-v1",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{
+			"install-config": string(icData),
+		},
+	}
+
+	controllerConfig, _ := yaml.Marshal(cm)
+	f, _ := os.CreateTemp("", "install-config.yaml")
+	f.Write(controllerConfig)
+	return f.Name()
+}
+
+func deleteTempInstallConfig(icFilePath string) {
+	os.Remove(icFilePath)
+}
+
+var _ = Describe("isOnPremPlatform", func() {
+	Context("for on-prem and cloud platforms", func() {
+		Context("without platformType", func() {
+			It("handles supported cloud platform install-config.yaml", func() {
+				ic := gcpInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeFalse())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("handles supported on-prem platform install-config.yaml", func() {
+				ic := baremetalInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeTrue())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("handles unsupported platform install-config.yaml", func() {
+				ic := noneInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeFalse())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("without install-config.yaml", func() {
+				onPrem, err := isOnPremPlatform("", "")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeTrue())
+			})
+		})
+		Context("with platformType", func() {
+			It("handles supported cloud platform install-config.yaml", func() {
+				ic := gcpInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "GCP")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeFalse())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("handles supported on-prem platform install-config.yaml", func() {
+				ic := baremetalInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "BareMetal")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeTrue())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("handles unsupported platform install-config.yaml", func() {
+				ic := noneInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "None")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeFalse())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("handles mismatched cloud platform install-config.yaml", func() {
+				ic := gcpInstallConfig()
+				icFilePath := createTempInstallConfig(ic)
+				onPrem, err := isOnPremPlatform(icFilePath, "AWS")
+				Expect(err).ShouldNot(BeNil())
+				Expect(onPrem).To(BeFalse())
+				deleteTempInstallConfig(icFilePath)
+			})
+			It("without install-config.yaml", func() {
+				onPrem, err := isOnPremPlatform("", "AWS")
+				Expect(err).To(BeNil())
+				Expect(onPrem).To(BeFalse())
+			})
+		})
+	})
+})
 
 func Test(t *testing.T) {
 	createTempResolvConf()

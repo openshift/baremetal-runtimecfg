@@ -65,8 +65,12 @@ func main() {
 			if err != nil {
 				return err
 			}
+			platformType, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				platformType = ""
+			}
 
-			return monitor.KeepalivedWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, apiPort, lbPort, checkInterval)
+			return monitor.KeepalivedWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, apiPort, lbPort, checkInterval, platformType)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
@@ -78,6 +82,7 @@ func main() {
 	rootCmd.PersistentFlags().IP("dns-vip", nil, "DEPRECATED: Virtual IP Address to reach an OpenShift node resolving DNS server")
 	rootCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens")
 	rootCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen")
+	rootCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
 	}
