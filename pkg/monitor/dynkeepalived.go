@@ -70,7 +70,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
 		return err
 	}
 
-	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(newConfig.Cluster.APIVIP), net.ParseIP(newConfig.Cluster.IngressVIP)})
+	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(newConfig.Cluster.APIVIP), net.ParseIP(newConfig.Cluster.IngressVIP)}, newConfig.Cluster.ControlPlaneTopology)
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
 		return err
@@ -83,7 +83,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
 			log.Warnf("Could not retrieve ingress config: %v", err)
 			return err
 		}
-		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(c.Cluster.APIVIP), net.ParseIP(c.Cluster.IngressVIP)})
+		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(c.Cluster.APIVIP), net.ParseIP(c.Cluster.IngressVIP)}, newConfig.Cluster.ControlPlaneTopology)
 		if err != nil {
 			log.Warnf("Could not retrieve LB config: %v", err)
 			return err
@@ -291,7 +291,7 @@ func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
 	return nil
 }
 
-func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration, platformType string) error {
+func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration, platformType string, controlPlaneTopology string) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
 
@@ -356,7 +356,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 
 		case desiredModeInfo := <-updateModeCh:
 
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{}, platformType)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{}, platformType, controlPlaneTopology)
 			if err != nil {
 				return err
 			}
@@ -431,7 +431,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				// if the path doesn't exist then RemoveAll returns nil
 				log.WithFields(logrus.Fields{"path": iptablesFilePath}).WithError(err).Error("Failed to remove file")
 			}
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{}, platformType)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, "/etc/resolv.conf", apiVips, ingressVips, 0, 0, 0, config.ClusterLBConfig{}, platformType, controlPlaneTopology)
 			if err != nil {
 				return err
 			}

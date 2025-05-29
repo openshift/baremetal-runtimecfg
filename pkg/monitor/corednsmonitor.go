@@ -43,7 +43,7 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 				return err
 			}
 			clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
-			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0, clusterLBConfig, platformType)
+			newConfig, err := config.GetConfig(kubeconfigPath, clusterConfigPath, resolvConfFilepath, apiVips, ingressVips, 0, 0, 0, clusterLBConfig, platformType, "")
 			if err != nil {
 				return err
 			}
