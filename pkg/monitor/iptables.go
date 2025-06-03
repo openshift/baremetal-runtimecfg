@@ -10,18 +10,27 @@ import (
 )
 
 const (
-	table       = "nat"
-	isLoopback  = true
-	notLoopback = false
+	table          = "nat"
+	isLoopback     = true
+	notLoopback    = false
+	redirectTarget = true
+	dnatTarget     = false
 )
 
-func getHAProxyRuleSpec(apiVip string, apiPort, lbPort uint16, loopback bool) (ruleSpec []string, err error) {
+func getHAProxyRuleSpec(apiVip string, apiPort, lbPort uint16, loopback, redirect bool) (ruleSpec []string, err error) {
 	apiPortStr := strconv.Itoa(int(apiPort))
 	lbPortStr := strconv.Itoa(int(lbPort))
-	ruleSpec = []string{"--dst", apiVip, "-p", "tcp", "--dport", apiPortStr, "-j", "REDIRECT", "--to-ports", lbPortStr, "-m", "comment", "--comment", "OCP_API_LB_REDIRECT"}
+	dstStr := net.JoinHostPort(apiVip, lbPortStr)
+	ruleSpec = []string{"--dst", apiVip, "-p", "tcp", "--dport", apiPortStr}
 	if loopback {
 		ruleSpec = append(ruleSpec, "-o", "lo")
 	}
+	if redirect {
+		ruleSpec = append(ruleSpec, "-j", "REDIRECT", "--to-ports", lbPortStr)
+	} else {
+		ruleSpec = append(ruleSpec, "-j", "DNAT", "--to-destination", dstStr)
+	}
+	ruleSpec = append(ruleSpec, "-m", "comment", "--comment", "OCP_API_LB_REDIRECT")
 	return ruleSpec, err
 }
 
@@ -39,11 +48,10 @@ func cleanHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) error {
 		return err
 	}
 
-	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort, notLoopback)
+	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort, notLoopback, dnatTarget)
 	if err != nil {
 		return err
 	}
-
 	chain := "PREROUTING"
 	if exists, _ := ipt.Exists(table, chain, ruleSpec...); exists {
 		log.WithFields(logrus.Fields{
@@ -54,7 +62,8 @@ func cleanHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) error {
 			return err
 		}
 	}
-	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback)
+
+	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback, redirectTarget)
 	if err != nil {
 		return err
 	}
@@ -74,7 +83,7 @@ func ensureHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) error {
 		return err
 	}
 
-	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort, notLoopback)
+	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort, notLoopback, dnatTarget)
 	if err != nil {
 		return err
 	}
@@ -89,7 +98,8 @@ func ensureHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) error {
 	if err != nil {
 		return err
 	}
-	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback)
+
+	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback, redirectTarget)
 	if err != nil {
 		return err
 	}
@@ -109,7 +119,7 @@ func checkHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) (bool, err
 		return false, err
 	}
 
-	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort, notLoopback)
+	ruleSpec, err := getHAProxyRuleSpec(apiVip, apiPort, lbPort, notLoopback, dnatTarget)
 	if err != nil {
 		return false, err
 	}
@@ -118,7 +128,7 @@ func checkHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) (bool, err
 		return false, err
 	}
 
-	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback)
+	ruleSpec, err = getHAProxyRuleSpec(apiVip, apiPort, lbPort, isLoopback, redirectTarget)
 	if err != nil {
 		return false, err
 	}
