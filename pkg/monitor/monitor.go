@@ -58,7 +58,7 @@ func Monitor(kubeconfigPath, clusterName, clusterDomain, templatePath, cfgPath s
 			}
 			return nil
 		default:
-			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, []net.IP{net.ParseIP(apiVips[0])})
+			config, err := config.GetLBConfig(kubeconfigPath, apiPort, lbPort, statPort, []net.IP{net.ParseIP(apiVips[0])}, "")
 			if err != nil {
 				log.WithFields(logrus.Fields{
 					"kubeconfigPath": kubeconfigPath,
