@@ -69,8 +69,12 @@ func main() {
 			if err != nil {
 				platformType = ""
 			}
+			controlPlaneTopology, err := cmd.Flags().GetString("control-plane-topology")
+			if err != nil {
+				controlPlaneTopology = ""
+			}
 
-			return monitor.KeepalivedWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, apiPort, lbPort, checkInterval, platformType)
+			return monitor.KeepalivedWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, apiPort, lbPort, checkInterval, platformType, controlPlaneTopology)
 		},
 	}
 	rootCmd.PersistentFlags().StringP("cluster-config", "c", "", "Path to cluster-config ConfigMap to retrieve ControlPlane info")
@@ -83,6 +87,7 @@ func main() {
 	rootCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens")
 	rootCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen")
 	rootCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
+	rootCmd.Flags().String("control-plane-topology", "", "Cluster Control Plane Topology")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
 	}

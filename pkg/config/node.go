@@ -29,6 +29,10 @@ const (
 	localhostKubeApiServerUrl string = "https://localhost:6443"
 	// labelNodeRolePrefix is a label prefix for node roles
 	labelNodeRolePrefix = "node-role.kubernetes.io/"
+	// highlyAvailableArbiterMode is the control plane topology when installing TNA
+	highlyAvailableArbiterMode string = "HighlyAvailableArbiter"
+	// dualReplicaTopologyMode is the control plane topology when installing TNF
+	dualReplicaTopologyMode string = "DualReplica"
 )
 
 type NodeAddress struct {
@@ -57,6 +61,7 @@ type Cluster struct {
 	CloudLBRecordType      string
 	CloudLBEmptyType       string
 	PlatformType           string
+	ControlPlaneTopology   string
 }
 
 type Backend struct {
@@ -533,10 +538,10 @@ func getNodeIpForRequestedIpStack(node v1.Node, filterIps []string, machineNetwo
 // statPort: The port on which the haproxy stats endpoint listens.
 // clusterLBConfig: A struct containing IPs for API, API-Int and Ingress LBs
 // platformType: Name of the platform.
-func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, clusterLBConfig ClusterLBConfig, platformType string) (node Node, err error) {
+func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips, ingressVips []net.IP, apiPort, lbPort, statPort uint16, clusterLBConfig ClusterLBConfig, platformType string, controlPlaneTopology string) (node Node, err error) {
 	if onPremPlatform, _ := isOnPremPlatform(clusterConfigPath, platformType); !onPremPlatform {
 		// Cloud Platforms with cloud LBs but no Cloud DNS
-		return getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath, clusterLBConfig, platformType)
+		return getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath, clusterLBConfig, platformType, controlPlaneTopology)
 	}
 	// On-prem platforms
 	vipCount := 0
@@ -558,7 +563,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 		} else {
 			ingressVip = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort, platformType)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, apiVip, ingressVip, apiPort, lbPort, statPort, platformType, controlPlaneTopology)
 		if err != nil {
 			return Node{}, err
 		}
@@ -568,7 +573,7 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 	return nodes[0], nil
 }
 
-func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, platformType string) (node Node, err error) {
+func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, platformType string, controlPlaneTopology string) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
 		return node, err
@@ -577,6 +582,7 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 	node.Cluster.Name = clusterName
 	node.Cluster.Domain = clusterDomain
 	node.Cluster.PlatformType = platformType
+	node.Cluster.ControlPlaneTopology = controlPlaneTopology
 
 	node.Cluster.PopulateVRIDs()
 
@@ -666,7 +672,7 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 
 // getSortedBackends builds config to communicate with kube-api based on kubeconfigPath parameter value, if kubeconfigPath is not empty it will build the
 // config based on that content else config will point to localhost.
-func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.IP) (backends []Backend, err error) {
+func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.IP, controlPlaneTopology string) (backends []Backend, err error) {
 	kubeApiServerUrl := ""
 	if readFromLocalAPI {
 		kubeApiServerUrl = localhostKubeApiServerUrl
@@ -690,22 +696,6 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 			"err": err,
 		}).Info("Failed to get master Nodes list")
 		return []Backend{}, err
-	}
-	// When installing TNA clusters using assisted service, one of the master nodes acts as the bootstrap.
-	// So during the installation there will only be one master node, but we need two in order to configure keepalived.
-	// We cannot wait until the bootstrap finishes and becomes a master, because then no node will have the API vip.
-	// To circumvent that we will add the arbiter node to the list of nodes.
-	if len(nodes.Items) == 1 {
-		arbiters, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "node-role.kubernetes.io/arbiter=",
-		})
-		if err != nil {
-			log.WithFields(logrus.Fields{
-				"err": err,
-			}).Info("Failed to get arbiter Nodes list")
-			return []Backend{}, err
-		}
-		nodes.Items = append(nodes.Items, arbiters.Items...)
 	}
 	if len(vips) == 0 {
 		return []Backend{}, fmt.Errorf("Trying to build config using empty VIPs")
@@ -754,13 +744,23 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 		}
 	}
 
+	// When installing TNA/TNF clusters using assisted service, one of the master nodes acts as the bootstrap.
+	// So during the installation there will only be one master node, but we need two in order to configure keepalived.
+	// We cannot wait until the bootstrap finishes and becomes a master, because then no node will have the API vip.
+	// To circumvent that we will temporarily add a dummy ip to the list of nodes.
+	// After the bootstrap becomes a master node, it's ip will replace the dummy ip in the list.
+	if len(nodes.Items) == 1 &&
+		(controlPlaneTopology == highlyAvailableArbiterMode || controlPlaneTopology == dualReplicaTopologyMode) {
+		backends = append(backends, Backend{Host: "dummy", Address: "0.0.0.0"})
+	}
+
 	sort.Slice(backends, func(i, j int) bool {
 		return backends[i].Address < backends[j].Address
 	})
 	return backends, nil
 }
 
-func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP) (ApiLBConfig, error) {
+func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP, controlPlaneTopology string) (ApiLBConfig, error) {
 	config := ApiLBConfig{
 		ApiPort:  apiPort,
 		LbPort:   lbPort,
@@ -776,11 +776,11 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips [
 		config.FrontendAddr = "::"
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
-	backends, err := getSortedBackends(kubeconfigPath, false, vips)
+	backends, err := getSortedBackends(kubeconfigPath, false, vips, controlPlaneTopology)
 	if err != nil {
 		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
 		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
-		backends, err = getSortedBackends(kubeconfigPath, true, vips)
+		backends, err = getSortedBackends(kubeconfigPath, true, vips, controlPlaneTopology)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"kubeconfigPath": kubeconfigPath,
@@ -858,7 +858,7 @@ func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
 	}
 }
 
-func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath string, clusterLBConfig ClusterLBConfig, platformType string) (node Node, err error) {
+func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPath string, clusterLBConfig ClusterLBConfig, platformType string, controlPlaneTopology string) (node Node, err error) {
 	var apiLBIP, apiIntLBIP, ingressIP net.IP
 	nodes := []Node{}
 
@@ -895,7 +895,7 @@ func getNodeConfigWithCloudLBIPs(kubeconfigPath, clusterConfigPath, resolvConfPa
 		} else {
 			ingressIP = nil
 		}
-		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0, platformType)
+		newNode, err := getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath, nil, nil, 0, 0, 0, platformType, controlPlaneTopology)
 		if err != nil {
 			return Node{}, err
 		}

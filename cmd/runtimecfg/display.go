@@ -1,10 +1,11 @@
 package main
 
 import (
+	"net"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/spf13/cobra"
-	"net"
 )
 
 var (
@@ -108,7 +109,7 @@ func runDisplay(cmd *cobra.Command, args []string) error {
 
 	clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
 
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType)
+	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType, "")
 	if err != nil {
 		return err
 	}
