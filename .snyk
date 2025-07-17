@@ -5,3 +5,7 @@ exclude:
   global:
     - vendor/**
     - "**/*_test.go"
+ignore:
+  'SNYK-GOLANG-GITHUBCOMMETAL3IOBAREMETALOPERATORAPISMETAL3IOV1ALPHA1-9480440':
+    - '*':
+        reason: 'baremetal-operator v0.8+ requires go1.23'
