@@ -1,12 +1,11 @@
 reviewers:
   - cybertron
-  - dougsland
+  - emy
   - mkowalski
 approvers:
   - cybertron
-  - dougsland
+  - emy
   - mkowalski
-  - mandre
-  - tsorya
+  - rbbratta
 component: Networking
 subcomponent: runtime-cfg
