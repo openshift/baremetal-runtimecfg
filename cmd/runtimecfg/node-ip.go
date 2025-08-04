@@ -223,6 +223,11 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 	// for the next loop interation.
 	timerLoop := 1
 
+	// Enable debug logging in utils package if requested
+	if os.Getenv("ENABLE_NODEIP_DEBUG") == "true" {
+		utils.SetDebugLogLevel()
+	}
+
 	ipFilterFunc := utils.ValidNodeAddress
 	for {
 		timerLoop = timerLoop * addSecondsToSuitableIPsLoop
