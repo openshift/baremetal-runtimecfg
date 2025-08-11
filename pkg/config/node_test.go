@@ -8,6 +8,8 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/installer/pkg/types"
+	"github.com/openshift/installer/pkg/types/aws"
+	"github.com/openshift/installer/pkg/types/azure"
 	"github.com/openshift/installer/pkg/types/baremetal"
 	"github.com/openshift/installer/pkg/types/gcp"
 	"github.com/openshift/installer/pkg/types/none"
@@ -358,6 +360,12 @@ var (
 		LibvirtURI:                   "qemu+tcp://192.168.122.1/system",
 		ProvisioningNetworkInterface: "ens3",
 	}
+	awsPlatform = aws.Platform{
+		Region: "us-east-1",
+	}
+	azurePlatform = azure.Platform{
+		Region: "us-east-1",
+	}
 	gcpPlatform = gcp.Platform{
 		ProjectID: "test-project",
 		Region:    "us-east-1",
@@ -368,6 +376,20 @@ var (
 func gcpInstallConfig() *types.InstallConfig {
 	installConfig.Platform = types.Platform{
 		GCP: &gcpPlatform,
+	}
+	return installConfig
+}
+
+func awsInstallConfig() *types.InstallConfig {
+	installConfig.Platform = types.Platform{
+		AWS: &awsPlatform,
+	}
+	return installConfig
+}
+
+func azureInstallConfig() *types.InstallConfig {
+	installConfig.Platform = types.Platform{
+		Azure: &azurePlatform,
 	}
 	return installConfig
 }
@@ -444,9 +466,9 @@ var _ = Describe("isOnPremPlatform", func() {
 		})
 		Context("with platformType", func() {
 			It("handles supported cloud platform install-config.yaml", func() {
-				ic := gcpInstallConfig()
+				ic := awsInstallConfig()
 				icFilePath := createTempInstallConfig(ic)
-				onPrem, err := isOnPremPlatform(icFilePath, "GCP")
+				onPrem, err := isOnPremPlatform(icFilePath, "AWS")
 				Expect(err).To(BeNil())
 				Expect(onPrem).To(BeFalse())
 				deleteTempInstallConfig(icFilePath)
@@ -468,7 +490,7 @@ var _ = Describe("isOnPremPlatform", func() {
 				deleteTempInstallConfig(icFilePath)
 			})
 			It("handles mismatched cloud platform install-config.yaml", func() {
-				ic := gcpInstallConfig()
+				ic := azureInstallConfig()
 				icFilePath := createTempInstallConfig(ic)
 				onPrem, err := isOnPremPlatform(icFilePath, "AWS")
 				Expect(err).ShouldNot(BeNil())
