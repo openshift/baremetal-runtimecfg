@@ -25,8 +25,8 @@ func GetIpFromFile(filePath string) (net.IP, error) {
 	ip := net.ParseIP(string(b))
 	if ip == nil {
 		msg := fmt.Sprintf("Failed to parse ip from file %s", filePath)
-		log.Errorf(msg)
-		return nil, fmt.Errorf(msg)
+		log.Errorf("%s", msg)
+		return nil, fmt.Errorf("%s", msg)
 	}
 	return ip, err
 }
