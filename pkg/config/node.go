@@ -198,6 +198,8 @@ func isOnPremPlatform(configPath string, platformType string) (bool, error) {
 		icPlatform = string(configv1.GCPPlatformType)
 	case ic.Platform.AWS != nil:
 		icPlatform = string(configv1.AWSPlatformType)
+	case ic.Platform.Azure != nil:
+		icPlatform = string(configv1.AzurePlatformType)
 	}
 
 	// Both "platform" parameter and install-config are present
@@ -213,7 +215,7 @@ func isOnPremPlatform(configPath string, platformType string) (bool, error) {
 		platform = platformType
 	}
 	switch platform {
-	case string(configv1.GCPPlatformType), string(configv1.AWSPlatformType):
+	case string(configv1.GCPPlatformType), string(configv1.AWSPlatformType), string(configv1.AzurePlatformType):
 		return false, nil
 	case string(configv1.BareMetalPlatformType), string(configv1.VSpherePlatformType), string(configv1.OpenStackPlatformType), string(configv1.OvirtPlatformType), string(configv1.NutanixPlatformType):
 		return true, nil
