@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -270,14 +271,20 @@ func addressesDefaultInternal(preferIPv6 bool, af AddressFilter, getAddrs addres
 	// c) IP address family
 	// d) The gateway being on the IP's CIDR
 	// e) The address being public
-	// f) IP address alphanumerically
+	// f) Prefer "real" IPv6 over IPv4-mapped IPv6 addresses
+	// g) IP address alphanumerically
 	sort.SliceStable(addrs, func(i, j int) bool {
 		if addrs[i].Priority == addrs[j].Priority {
 			if addrs[i].LinkIndex == addrs[j].LinkIndex {
 				if IsNetIPv6(addrs[i].Network) == IsNetIPv6(addrs[j].Network) {
 					if addrs[i].GatewayOnSubnet == addrs[j].GatewayOnSubnet {
 						if !addrs[i].Network.IP.IsPrivate() == !addrs[j].Network.IP.IsPrivate() {
-							return addrs[i].Network.IP.String() < addrs[j].Network.IP.String()
+							iIsIPv4Mapped := IsIPv4(addrs[i].Network.IP)
+							jIsIPv4Mapped := IsIPv4(addrs[j].Network.IP)
+							if iIsIPv4Mapped != jIsIPv4Mapped {
+								return jIsIPv4Mapped
+							}
+							return bytes.Compare(addrs[i].Network.IP, addrs[j].Network.IP) < 0
 						}
 						return !addrs[i].Network.IP.IsPrivate()
 					}
