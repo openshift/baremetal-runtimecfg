@@ -3,7 +3,6 @@ package monitor
 import (
 	"crypto/rand"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -56,7 +55,7 @@ var _ = Describe("lease_vip", func() {
 
 		testName = generateUUID()[:4]
 
-		file, err := ioutil.TempFile("", "config")
+		file, err := os.CreateTemp("", "config")
 		Expect(err).ShouldNot(HaveOccurred())
 		cfgPath = file.Name()
 	})
@@ -278,7 +277,7 @@ var _ = Describe("getVipsToLease", func() {
 	It("path_is_directory", func() {
 		var buffer []byte
 
-		Expect(ioutil.WriteFile(path, buffer, os.ModeDir)).ShouldNot(HaveOccurred())
+		Expect(os.WriteFile(path, buffer, os.ModeDir)).ShouldNot(HaveOccurred())
 
 		vips, err := getVipsToLease(cfgPath)
 		Expect(err).Should(HaveOccurred())
@@ -288,7 +287,7 @@ var _ = Describe("getVipsToLease", func() {
 	It("invalid_content", func() {
 		var buffer []byte = []byte("hello\n")
 
-		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+		Expect(os.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
 
 		vips, err := getVipsToLease(cfgPath)
 		Expect(err).Should(HaveOccurred())
@@ -304,7 +303,7 @@ var _ = Describe("getVipsToLease", func() {
 		buffer, err := yaml.Marshal(&data)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+		Expect(os.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
 
 		vips, err := getVipsToLease(cfgPath)
 		Expect(err).Should(HaveOccurred())
@@ -320,7 +319,7 @@ var _ = Describe("getVipsToLease", func() {
 		buffer, err := yaml.Marshal(&data)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+		Expect(os.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
 
 		vips, err := getVipsToLease(cfgPath)
 		Expect(err).Should(HaveOccurred())
@@ -338,7 +337,7 @@ var _ = Describe("getVipsToLease", func() {
 		buffer, err := yaml.Marshal(&data)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		Expect(ioutil.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
+		Expect(os.WriteFile(path, buffer, 0644)).ShouldNot(HaveOccurred())
 
 		vips, err := getVipsToLease(cfgPath)
 		Expect(err).Should(BeNil())
@@ -359,7 +358,7 @@ var _ = Describe("RunWatcher", func() {
 	)
 
 	BeforeEach(func() {
-		file, err := ioutil.TempFile("", "config")
+		file, err := os.CreateTemp("", "config")
 		Expect(err).ShouldNot(HaveOccurred())
 		leaseFile = file.Name()
 

@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -37,7 +36,7 @@ func DnsmasqWatch(kubeconfigPath, templatePath, cfgPath string, apiVips []net.IP
 			if err != nil {
 				return err
 			}
-			tmpFile, err := ioutil.TempFile("", "")
+			tmpFile, err := os.CreateTemp("", "")
 			if err != nil {
 				return err
 			}

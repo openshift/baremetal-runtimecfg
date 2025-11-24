@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -44,7 +43,7 @@ func getVipsToLease(cfgPath string) (vips *yamlVips, err error) {
 			"file": monitorConfPath,
 		}).Info("Monitor conf file exist")
 
-		data, err := ioutil.ReadFile(monitorConfPath)
+		data, err := os.ReadFile(monitorConfPath)
 
 		if err != nil {
 			log.WithFields(logrus.Fields{
@@ -172,7 +171,7 @@ func formatHostname(mac string, suffix string) string {
 }
 
 func GetLastLeaseFromFile(log logrus.FieldLogger, fileName string) (string, string, error) {
-	data, err := ioutil.ReadFile(fileName)
+	data, err := os.ReadFile(fileName)
 
 	if err != nil {
 		log.WithFields(logrus.Fields{

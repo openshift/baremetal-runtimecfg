@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"net"
 	"os"
 
@@ -118,7 +117,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 
 	outDir, err := cmd.Flags().GetString("out-dir")
 	if outDir == "" {
-		outDir, err = ioutil.TempDir("", "runtimecfg")
+		outDir, err = os.MkdirTemp("", "runtimecfg")
 		if err != nil {
 			return err
 		}

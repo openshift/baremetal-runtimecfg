@@ -3,7 +3,6 @@ package render
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"strings"
@@ -84,7 +83,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 		}
 		if fi.Mode().IsDir() {
 			templateDir := paths[0]
-			files, err := ioutil.ReadDir(templateDir)
+			files, err := os.ReadDir(templateDir)
 			if err != nil {
 				log.WithFields(logrus.Fields{
 					"path": templateDir,
@@ -93,7 +92,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 			}
 			tempPaths = make([]string, 0)
 			for _, entryFi := range files {
-				if entryFi.Mode().IsRegular() {
+				if entryFi.Type().IsRegular() {
 					if path.Ext(entryFi.Name()) == ext {
 						tempPaths = append(tempPaths, path.Join(templateDir, entryFi.Name()))
 					}
