@@ -86,20 +86,18 @@ var (
 	testApiVipV6         = "fd00::101"
 	testIngressVipV4     = "192.168.1.102"
 	testIngressVipV6     = "fd00::102"
-
-	debug = true
 )
 
 var _ = Describe("getNodePeersForIpStack", func() {
 	Context("for dual-stack node", func() {
 		Context("with address only in status", func() {
 			It("matches an IPv4 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack1, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack1, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
 				Expect(err).To(BeNil())
 			})
 			It("matches an IPv6 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack1, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack1, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 				Expect(res).To(Equal("fd00::5"))
 				Expect(err).To(BeNil())
 			})
@@ -107,12 +105,12 @@ var _ = Describe("getNodePeersForIpStack", func() {
 
 		Context("with address only in OVN HostAddresses annotation", func() {
 			It("matches an IPv4 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack3, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack3, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
 				Expect(err).To(BeNil())
 			})
 			It("matches an IPv6 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack3, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack3, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 				Expect(res).To(Equal("fd00::5"))
 				Expect(err).To(BeNil())
 			})
@@ -120,12 +118,12 @@ var _ = Describe("getNodePeersForIpStack", func() {
 
 		Context("with address only in OVN HostCidrs annotation", func() {
 			It("matches an IPv4 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack5, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack5, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
 				Expect(err).To(BeNil())
 			})
 			It("matches an IPv6 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack5, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack5, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 				Expect(res).To(Equal("fd00::5"))
 				Expect(err).To(BeNil())
 			})
@@ -133,12 +131,12 @@ var _ = Describe("getNodePeersForIpStack", func() {
 
 		Context("with address in status and OVN HostAddresses annotation", func() {
 			It("matches an IPv4 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack2, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack2, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
 				Expect(err).To(BeNil())
 			})
 			It("matches an IPv6 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack2, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack2, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 				Expect(res).To(Equal("fd00::5"))
 				Expect(err).To(BeNil())
 			})
@@ -146,12 +144,12 @@ var _ = Describe("getNodePeersForIpStack", func() {
 
 		Context("with address in status and OVN HostCidrs annotation", func() {
 			It("matches an IPv4 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack4, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack4, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 				Expect(res).To(Equal("192.168.1.99"))
 				Expect(err).To(BeNil())
 			})
 			It("matches an IPv6 VIP", func() {
-				res, err := getNodeIpForRequestedIpStack(testNodeDualStack4, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+				res, err := getNodeIpForRequestedIpStack(testNodeDualStack4, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 				Expect(res).To(Equal("fd00::5"))
 				Expect(err).To(BeNil())
 			})
@@ -160,12 +158,12 @@ var _ = Describe("getNodePeersForIpStack", func() {
 
 	Context("for single-stack v4 node", func() {
 		It("matches an IPv4 VIP", func() {
-			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 			Expect(res).To(Equal("192.168.1.99"))
 			Expect(err).To(BeNil())
 		})
 		It("empty for IPv6 VIP", func() {
-			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 			Expect(res).To(Equal(""))
 			Expect(err).To(BeNil())
 		})
@@ -173,25 +171,25 @@ var _ = Describe("getNodePeersForIpStack", func() {
 
 	Context("for single-stack v6 node", func() {
 		It("empty for IPv4 VIP", func() {
-			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV6, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV6, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 			Expect(res).To(Equal(""))
 			Expect(err).To(BeNil())
 		})
 		It("matches an IPv6 VIP", func() {
-			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV6, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6, debug)
+			res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV6, []string{testApiVipV6, testIngressVipV6}, testMachineNetworkV6)
 			Expect(res).To(Equal("fd00::5"))
 			Expect(err).To(BeNil())
 		})
 	})
 
 	It("empty for empty node", func() {
-		res, err := getNodeIpForRequestedIpStack(v1.Node{}, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4, debug)
+		res, err := getNodeIpForRequestedIpStack(v1.Node{}, []string{testApiVipV4, testIngressVipV4}, testMachineNetworkV4)
 		Expect(res).To(Equal(""))
 		Expect(err).To(BeNil())
 	})
 
 	It("empty for node with IPs and empty VIP requested", func() {
-		res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{}, testMachineNetworkV4, debug)
+		res, err := getNodeIpForRequestedIpStack(testNodeSingleStackV4, []string{}, testMachineNetworkV4)
 		Expect(res).To(Equal(""))
 		Expect(err.Error()).To(Equal("for node testNode requested NodeIP detection with empty filterIP list. Cannot detect IP stack"))
 	})

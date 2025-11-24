@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -11,12 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
+	"github.com/openshift/baremetal-runtimecfg/pkg/loggingconfig"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -30,6 +32,7 @@ const (
 	processingTimeInSec           uint16        = 30
 	iptablesFilePath                            = "/var/run/keepalived/iptables-rule-exists"
 	bootstrapApiFailuresThreshold int           = 4
+	loggingConfigMapName                        = "logging"
 )
 
 type APIState uint8
@@ -291,6 +294,14 @@ func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
 	return nil
 }
 
+func mustGetNamespace() string {
+	ns := os.Getenv("POD_NAMESPACE")
+	if ns == "" {
+		panic("POD_NAMESPACE environment variable not set")
+	}
+	return ns
+}
+
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration, platformType string, controlPlaneTopology string) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
@@ -299,17 +310,18 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		return err
 	}
 
-	signals := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
+	ctx, stopProcessingSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stopProcessingSignals()
+
+	loggingWatcher, err := loggingconfig.NewWatcher(kubeconfigPath, mustGetNamespace(), loggingConfigMapName)
+	if err != nil {
+		log.WithError(err).Error("Failed to init logging config watcher")
+		return err
+	}
+	go loggingWatcher.Run(ctx)
+
 	updateModeCh := make(chan modeUpdateInfo, 1)
 	bootstrapStopKeepalived := make(chan APIState, 1)
-
-	signal.Notify(signals, syscall.SIGTERM)
-	signal.Notify(signals, syscall.SIGINT)
-	go func() {
-		<-signals
-		done <- true
-	}()
 
 	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh)
 
@@ -328,7 +340,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	defer conn.Close()
 	for {
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return nil
 
 		case APIStateChanged := <-bootstrapStopKeepalived:

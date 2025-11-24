@@ -1,15 +1,12 @@
 package utils
 
 import (
-	"context"
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"net/http"
 	"os"
 	"strings"
@@ -136,34 +133,4 @@ func Mapper[T, U any](data []T, f func(T) U) []U {
 		res = append(res, f(e))
 	}
 	return res
-}
-
-// GetNodeIPDebugStatus checks if NodeIP detection debug mode is enabled in the configmap.
-// Explicitly ignore errors, as if there is no configmap, no custom config to be applied.
-// Function is designed to work in the following way
-//   - in boostrap node debug logging should be ENABLED
-//   - inside installed cluster
-//     -- if config map does not exist, debug logging DISABLED
-//     -- if config map exists without "enable-nodeip-debug" key, debug logging DISABLED
-//     -- if config map returns error, debug logging
-func GetNodeIPDebugStatus(clientset *kubernetes.Clientset) bool {
-	if os.Getenv("IS_BOOTSTRAP") == "yes" {
-		return true
-	}
-
-	cm, err := clientset.CoreV1().ConfigMaps(os.Getenv("POD_NAMESPACE")).Get(context.TODO(), "logging", metav1.GetOptions{})
-	if err != nil {
-		if strings.HasSuffix(err.Error(), "not found") {
-			return false
-		}
-		log.WithFields(logrus.Fields{"err": err}).Warn("Failed to get logging configuration")
-		return true
-	}
-	if value, ok := cm.Data["enable-nodeip-debug"]; ok {
-		if value == "true" {
-			return true
-		}
-	}
-
-	return false
 }
