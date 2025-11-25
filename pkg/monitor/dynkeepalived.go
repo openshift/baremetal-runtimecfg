@@ -339,7 +339,9 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		   Keepalived on the bootstrap continue to run, this behavior might cause problems when unicast keepalived being used,
 		   so, Keepalived on bootstrap should stop running when local kube-apiserver isn't operational anymore.
 		   handleBootstrapStopKeepalived function is responsible to stop Keepalived when the condition is met. */
-		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived, nodeWatcher)
+
+		// Additionally, on bootstrap we don't care about caching the nodes because we don't need performance optimizations.
+		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived, nil)
 	}
 
 	conn, err := net.Dial("unix", keepalivedControlSock)
