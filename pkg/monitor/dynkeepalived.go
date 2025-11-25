@@ -18,6 +18,7 @@ import (
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/loggingconfig"
+	"github.com/openshift/baremetal-runtimecfg/pkg/nodeconfig"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 )
 
@@ -61,19 +62,19 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
-func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
+func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node, nodeCache config.NodeCacheGetter) error {
 	var err error
 
 	if !newConfig.EnableUnicast {
 		return err
 	}
-	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{newConfig.Cluster.APIVIP, newConfig.Cluster.IngressVIP})
+	newConfig.IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{newConfig.Cluster.APIVIP, newConfig.Cluster.IngressVIP}, nodeCache)
 	if err != nil {
 		log.Warnf("Could not retrieve ingress config: %v", err)
 		return err
 	}
 
-	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(newConfig.Cluster.APIVIP), net.ParseIP(newConfig.Cluster.IngressVIP)}, newConfig.Cluster.ControlPlaneTopology)
+	newConfig.LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(newConfig.Cluster.APIVIP), net.ParseIP(newConfig.Cluster.IngressVIP)}, newConfig.Cluster.ControlPlaneTopology, nodeCache)
 	if err != nil {
 		log.Warnf("Could not retrieve LB config: %v", err)
 		return err
@@ -81,12 +82,12 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node) error {
 
 	for i, c := range *newConfig.Configs {
 		// Must do this by index instead of using c because c is local to this loop
-		(*newConfig.Configs)[i].IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{c.Cluster.APIVIP, c.Cluster.IngressVIP})
+		(*newConfig.Configs)[i].IngressConfig, err = config.GetIngressConfig(kubeconfigPath, []string{c.Cluster.APIVIP, c.Cluster.IngressVIP}, nodeCache)
 		if err != nil {
 			log.Warnf("Could not retrieve ingress config: %v", err)
 			return err
 		}
-		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(c.Cluster.APIVIP), net.ParseIP(c.Cluster.IngressVIP)}, newConfig.Cluster.ControlPlaneTopology)
+		(*newConfig.Configs)[i].LBConfig, err = config.GetLBConfig(kubeconfigPath, dummyPortNum, dummyPortNum, dummyPortNum, []net.IP{net.ParseIP(c.Cluster.APIVIP), net.ParseIP(c.Cluster.IngressVIP)}, newConfig.Cluster.ControlPlaneTopology, nodeCache)
 		if err != nil {
 			log.Warnf("Could not retrieve LB config: %v", err)
 			return err
@@ -148,7 +149,7 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 	return updateRequired, desiredModeInfo
 }
 
-func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState) {
+func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState, nodeCache config.NodeCacheGetter) {
 	consecutiveErr := 0
 
 	/* It should take up to ~20 seconds for the local kube-apiserver to start running on the
@@ -158,7 +159,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	*/
 	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
 	for start := time.Now(); time.Since(start) < time.Minute*30; {
-		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}); err == nil {
+		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}, nodeCache); err == nil {
 			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
 			break
 		}
@@ -167,7 +168,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	}
 
 	for {
-		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}); err != nil {
+		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}, nodeCache); err != nil {
 			// We have started to talk to Ironic through the API VIP as well,
 			// so if Ironic is still up then we need to keep the VIP, even if
 			// the apiserver has gone down.
@@ -194,7 +195,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	}
 }
 
-func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh chan modeUpdateInfo) {
+func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh chan modeUpdateInfo, nodeCache config.NodeCacheGetter) {
 
 	// create Ticker that will run every round modeUpdateIntervalInSec
 	nextTickTime := time.Now().Add((modeUpdateIntervalInSec / 2) * time.Second).Round(modeUpdateIntervalInSec * time.Second)
@@ -218,7 +219,7 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 			}).Info("Update Mode request detected, verify that upgrade process completed")
 
 			// before applying mode update we should verify that upgrade process completed.
-			upgradeRunning, err := config.IsUpgradeStillRunning(kubeconfigPath)
+			upgradeRunning, err := config.IsUpgradeStillRunning(kubeconfigPath, nodeCache)
 			if err != nil || upgradeRunning {
 				log.WithFields(logrus.Fields{
 					"err":            err,
@@ -320,17 +321,25 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	}
 	go loggingWatcher.Run(ctx)
 
+	// Initialize the node watcher to cache node information
+	nodeWatcher, err := nodeconfig.NewNodeWatcher(kubeconfigPath)
+	if err != nil {
+		log.WithError(err).Error("Failed to init node watcher")
+		return err
+	}
+	go nodeWatcher.Run(ctx)
+
 	updateModeCh := make(chan modeUpdateInfo, 1)
 	bootstrapStopKeepalived := make(chan APIState, 1)
 
-	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh)
+	go handleConfigModeUpdate(cfgPath, kubeconfigPath, updateModeCh, nodeWatcher)
 
 	if os.Getenv("IS_BOOTSTRAP") == "yes" {
 		/* When OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP is set to true the bootstrap node won't be destroyed and
 		   Keepalived on the bootstrap continue to run, this behavior might cause problems when unicast keepalived being used,
 		   so, Keepalived on bootstrap should stop running when local kube-apiserver isn't operational anymore.
 		   handleBootstrapStopKeepalived function is responsible to stop Keepalived when the condition is met. */
-		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived)
+		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived, nodeWatcher)
 	}
 
 	conn, err := net.Dial("unix", keepalivedControlSock)
@@ -385,7 +394,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			}
 			// We have to get a valid unicast config before the migration
 			for {
-				err = updateUnicastConfig(kubeconfigPath, &newConfig)
+				err = updateUnicastConfig(kubeconfigPath, &newConfig, nodeWatcher)
 				if err == nil {
 					break
 				}
@@ -464,7 +473,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 			for i, _ := range *newConfig.Configs {
 				(*newConfig.Configs)[i].EnableUnicast = newConfig.EnableUnicast
 			}
-			err = updateUnicastConfig(kubeconfigPath, &newConfig)
+			err = updateUnicastConfig(kubeconfigPath, &newConfig, nodeWatcher)
 			if err != nil {
 				// We don't want to render a new config with an incomplete
 				// unicast peer list

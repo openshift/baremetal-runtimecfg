@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/signal"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
+	"github.com/openshift/baremetal-runtimecfg/pkg/nodeconfig"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -20,12 +22,24 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 
+	// Initialize the node watcher to cache node information
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGINT)
 	go func() {
 		<-signals
+		cancel() // Cancel the context for node watcher
 		done <- true
 	}()
+
+	nodeWatcher, err := nodeconfig.NewNodeWatcher(kubeconfigPath)
+	if err != nil {
+		log.WithError(err).Error("Failed to init node watcher")
+		return err
+	}
+	go nodeWatcher.Run(ctx)
 
 	prevMD5, err := utils.GetFileMd5(resolvConfFilepath)
 	if err != nil {
@@ -55,7 +69,7 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 				return err
 			}
 
-			config.PopulateNodeAddresses(kubeconfigPath, &newConfig)
+			config.PopulateNodeAddresses(kubeconfigPath, &newConfig, nodeWatcher)
 			// There should never be 0 nodes in a functioning cluster. This means
 			// we failed to populate the list, so we don't want to render.
 			if len(newConfig.Cluster.NodeAddresses) == 0 {
