@@ -307,6 +307,23 @@ func multipleDefaultRouteMapSamePriority(rf RouteFilter) (map[int][]netlink.Rout
 	return routes, nil
 }
 
+func ipv6MultipleAddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
+	addrs := make(map[netlink.Link][]netlink.Addr)
+	// Add multiple IPv6 addresses on eth0 with identical characteristics
+	// These should be sorted alphanumerically by IP address
+	maybeAddAddress(addrs, af, eth0, "2001:db8::3/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "2001:db8::1/64", false, "")
+	maybeAddAddress(addrs, af, eth0, "2001:db8::2/64", false, "")
+	return addrs, nil
+}
+
+func ipv6MultipleRouteMap(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	// Add a default route on eth0 - all addresses will have same priority/link
+	maybeAddRoute(routes, rf, eth0, "", false, 100, "")
+	return routes, nil
+}
+
 var _ = Describe("addresses", func() {
 	It("matches an IPv4 VIP on the primary interface", func() {
 		addrs, err := addressesRoutingInternal(
@@ -594,6 +611,19 @@ var _ = Describe("addresses", func() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("10.0.0.5")}))
+	})
+
+	It("sorts multiple IPv6 addresses alphanumerically when all other criteria are equal", func() {
+		addrs, err := addressesDefaultInternal(
+			true, // preferIPv6 = true
+			ValidNodeAddress,
+			ipv6MultipleAddrMap,
+			ipv6MultipleRouteMap,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		// Should return addresses in alphanumeric order: 2001:db8::1, 2001:db8::2, 2001:db8::3
+		// Since we only take one IPv6 address, it should be the first one: 2001:db8::1
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("2001:db8::1")}))
 	})
 })
 
