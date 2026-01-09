@@ -2,8 +2,8 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
@@ -17,7 +17,7 @@ const (
 // Return ip from primaryIp file if file and ip exists and readable
 // In case of error return empty string
 func GetIpFromFile(filePath string) (net.IP, error) {
-	b, err := ioutil.ReadFile(filePath)
+	b, err := os.ReadFile(filePath)
 	if err != nil {
 		log.WithError(err).Infof("Failed to read ip from file %s", filePath)
 		return nil, err

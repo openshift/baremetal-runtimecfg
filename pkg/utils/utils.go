@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -34,7 +33,7 @@ func ShortHostname() (shortName string, err error) {
 	var hostname string
 
 	if filePath, ok := os.LookupEnv("RUNTIMECFG_HOSTNAME_PATH"); ok {
-		dat, err := ioutil.ReadFile(filePath)
+		dat, err := os.ReadFile(filePath)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"filePath": filePath,

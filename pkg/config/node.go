@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
@@ -225,7 +224,7 @@ func isOnPremPlatform(configPath string, platformType string) (bool, error) {
 }
 
 func getClusterConfigMapInstallConfig(configPath string) (installConfig types.InstallConfig, err error) {
-	yamlFile, err := ioutil.ReadFile(configPath)
+	yamlFile, err := os.ReadFile(configPath)
 	if err != nil {
 		return installConfig, err
 	}

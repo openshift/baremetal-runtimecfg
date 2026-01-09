@@ -3,7 +3,6 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -49,7 +48,7 @@ func getActualMode(cfgPath string) (error, bool) {
 		return err, enableUnicast
 	}
 
-	b, err := ioutil.ReadFile(cfgPath)
+	b, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return err, enableUnicast
 	}
@@ -129,7 +128,7 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 		}
 	}
 
-	yamlFile, err := ioutil.ReadFile(filePath)
+	yamlFile, err := os.ReadFile(filePath)
 	if err != nil {
 		log.Warnf("Could not ReadFile %s", filePath)
 		return updateRequired, desiredModeInfo
