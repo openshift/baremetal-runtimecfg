@@ -269,14 +269,31 @@ func GetVRRPConfig(apiVip, ingressVip net.IP) (vipIface net.Interface, nonVipAdd
 	return getInterfaceAndNonVIPAddr(vips)
 }
 
+// NodeCacheGetter is an interface for getting cached node information.
+// This allows us to use either the NodeWatcher cache or fall back to direct API calls.
+type NodeCacheGetter interface {
+	GetNodes() *v1.NodeList
+	GetMasterNodes() *v1.NodeList
+	GetNodeCount() int
+}
+
 // GetNodes will return a list of all nodes in the cluster
 //
 // Args:
 //   - kubeconfigPath as string
+//   - nodeCache (optional) - if provided, uses cached data instead of API call
 //
 // Returns:
 //   - v1.NodeList or error
-func GetNodes(kubeconfigPath string) (*v1.NodeList, error) {
+func GetNodes(kubeconfigPath string, nodeCache NodeCacheGetter) (*v1.NodeList, error) {
+	// If a cache is provided, use it
+	if nodeCache != nil {
+		log.Debugf("Node cache available. Contains %d nodes.", nodeCache.GetNodeCount())
+		return nodeCache.GetNodes(), nil
+	}
+
+	// Fall back to direct API call
+	log.Debugf("Node cache not available. Falling back to direct API call.")
 	config, err := utils.GetClientConfig("", kubeconfigPath)
 	if err != nil {
 		return nil, err
@@ -294,6 +311,44 @@ func GetNodes(kubeconfigPath string) (*v1.NodeList, error) {
 	return nodes, nil
 }
 
+// GetMasterNodesWithConfig returns a list of master nodes in the cluster.
+// Supports custom API server URL for special cases (e.g., localhost for bootstrap).
+//
+// Args:
+//   - kubeApiServerUrl - custom API server URL (empty string for default)
+//   - kubeconfigPath - path to kubeconfig
+//   - nodeCache (optional) - if provided, uses cached data instead of API call
+//
+// Returns:
+//   - v1.NodeList or error
+func GetMasterNodesWithConfig(kubeApiServerUrl, kubeconfigPath string, nodeCache NodeCacheGetter) (*v1.NodeList, error) {
+	// If a cache is provided, use it
+	if nodeCache != nil {
+		log.Debugf("Node cache available. Contains %d nodes.", nodeCache.GetNodeCount())
+		return nodeCache.GetMasterNodes(), nil
+	}
+
+	// Fall back to direct API call
+	log.Debugf("Node cache not available. Falling back to direct API call.")
+	config, err := utils.GetClientConfig(kubeApiServerUrl, kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
+		LabelSelector: "node-role.kubernetes.io/master=",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
 // IsUpgradeStillRunning check if the upgrade is still running by looking at
 // the nodes' machineconfiguration state and kubelet version. Once all of the
 // machineconfigurations are Done and all kubelet versions match we know it
@@ -301,11 +356,12 @@ func GetNodes(kubeconfigPath string) (*v1.NodeList, error) {
 //
 // Args:
 //   - kubeconfigPath as string
+//   - nodeCache (optional) - if provided, uses cached data instead of API call
 //
 // Returns:
 //   - true (upgrade still running), false (upgrade complete) or error
-func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
-	nodes, err := GetNodes(kubeconfigPath)
+func IsUpgradeStillRunning(kubeconfigPath string, nodeCache NodeCacheGetter) (bool, error) {
+	nodes, err := GetNodes(kubeconfigPath, nodeCache)
 	if err != nil {
 		return false, err
 	}
@@ -331,20 +387,11 @@ func IsUpgradeStillRunning(kubeconfigPath string) (bool, error) {
 	return false, nil
 }
 
-func GetIngressConfig(kubeconfigPath string, vips []string) (IngressConfig, error) {
+func GetIngressConfig(kubeconfigPath string, vips []string, nodeCache NodeCacheGetter) (IngressConfig, error) {
 	var machineNetwork string
 	var ingressConfig IngressConfig
 
-	config, err := utils.GetClientConfig("", kubeconfigPath)
-	if err != nil {
-		return ingressConfig, err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return ingressConfig, err
-	}
-
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	nodes, err := GetNodes(kubeconfigPath, nodeCache)
 	if err != nil {
 		return ingressConfig, err
 	}
@@ -664,25 +711,13 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 
 // getSortedBackends builds config to communicate with kube-api based on kubeconfigPath parameter value, if kubeconfigPath is not empty it will build the
 // config based on that content else config will point to localhost.
-func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.IP, controlPlaneTopology string) (backends []Backend, err error) {
+func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.IP, controlPlaneTopology string, nodeCache NodeCacheGetter) (backends []Backend, err error) {
 	kubeApiServerUrl := ""
 	if readFromLocalAPI {
 		kubeApiServerUrl = localhostKubeApiServerUrl
 	}
-	config, err := utils.GetClientConfig(kubeApiServerUrl, kubeconfigPath)
-	if err != nil {
-		return []Backend{}, err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"err": err,
-		}).Info("Failed to get client")
-		return []Backend{}, err
-	}
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "node-role.kubernetes.io/master=",
-	})
+
+	nodes, err := GetMasterNodesWithConfig(kubeApiServerUrl, kubeconfigPath, nodeCache)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"err": err,
@@ -755,7 +790,7 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	return backends, nil
 }
 
-func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP, controlPlaneTopology string) (ApiLBConfig, error) {
+func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips []net.IP, controlPlaneTopology string, nodeCache NodeCacheGetter) (ApiLBConfig, error) {
 	config := ApiLBConfig{
 		ApiPort:  apiPort,
 		LbPort:   lbPort,
@@ -771,11 +806,11 @@ func GetLBConfig(kubeconfigPath string, apiPort, lbPort, statPort uint16, vips [
 		config.FrontendAddr = "::"
 	}
 	// Try reading master nodes details first from api-vip:kube-apiserver and failover to localhost:kube-apiserver
-	backends, err := getSortedBackends(kubeconfigPath, false, vips, controlPlaneTopology)
+	backends, err := getSortedBackends(kubeconfigPath, false, vips, controlPlaneTopology, nodeCache)
 	if err != nil {
 		log.Infof("An error occurred while trying to read master nodes details from api-vip:kube-apiserver: %v", err)
 		log.Infof("Trying to read master nodes details from localhost:kube-apiserver")
-		backends, err = getSortedBackends(kubeconfigPath, true, vips, controlPlaneTopology)
+		backends, err = getSortedBackends(kubeconfigPath, true, vips, controlPlaneTopology, nodeCache)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"kubeconfigPath": kubeconfigPath,
@@ -805,20 +840,8 @@ func GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath string) (clusterN
 	return
 }
 
-func PopulateNodeAddresses(kubeconfigPath string, node *Node) {
-	// Get node list
-	config, err := utils.GetClientConfig("", kubeconfigPath)
-	if err != nil {
-		log.Errorf("Failed to build client config: %s", err)
-		return
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Errorf("Failed to create client: %s", err)
-		return
-	}
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+func PopulateNodeAddresses(kubeconfigPath string, node *Node, nodeCache NodeCacheGetter) {
+	nodes, err := GetNodes(kubeconfigPath, nodeCache)
 	if err != nil {
 		log.Errorf("Failed to get node list: %s", err)
 		return

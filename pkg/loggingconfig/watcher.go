@@ -17,6 +17,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
+	"github.com/openshift/baremetal-runtimecfg/pkg/nodeconfig"
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
@@ -149,10 +150,12 @@ func (w *Watcher) setDebugEnabled(debug bool, forceUpdate bool) {
 	if debug {
 		log.Info("Debug logging enabled")
 		config.SetDebugLogLevel()
+		nodeconfig.SetDebugLogLevel()
 		utils.SetDebugLogLevel()
 	} else {
 		log.Info("Debug logging disabled")
 		config.SetInfoLogLevel()
+		nodeconfig.SetInfoLogLevel()
 		utils.SetInfoLogLevel()
 	}
 
