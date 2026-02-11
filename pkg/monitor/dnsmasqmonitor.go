@@ -81,6 +81,7 @@ func DnsmasqWatch(kubeconfigPath, templatePath, cfgPath string, apiVips []net.IP
 }
 
 func ReloadDnsmasq() error {
+	// remove dbus from Dockerfiles if this goes away
 	cmd := exec.Command("dbus-send", "--system", "--dest=uk.org.thekelleys.dnsmasq", "/uk/org/thekelleys/dnsmasq", "uk.org.thekelleys.ClearCache")
 	return cmd.Run()
 }
