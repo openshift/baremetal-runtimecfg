@@ -241,59 +241,6 @@ func handleConfigModeUpdate(cfgPath string, kubeconfigPath string, updateModeCh 
 	}
 }
 
-func handleLeasing(cfgPath string, apiVips, ingressVips []net.IP) error {
-	vips, err := getVipsToLease(cfgPath)
-
-	if err != nil {
-		return err
-	}
-
-	if vips == nil {
-		return nil
-	}
-
-	if len(apiVips) != len(vips.APIVips) {
-		return fmt.Errorf("Mismatched number of API VIPs. Expected: %d Actual: %d", len(apiVips), len(vips.APIVips))
-	}
-	if len(ingressVips) != len(vips.IngressVips) {
-		return fmt.Errorf("Mismatched number of Ingress VIPs. Expected: %d Actual: %d", len(ingressVips), len(vips.IngressVips))
-	}
-
-	for i, vip := range vips.APIVips {
-		if vip.IpAddress != apiVips[i].String() {
-			return fmt.Errorf("Mismatched ip for api. Expected: %s Actual: %s", apiVips[i].String(), vips.APIVip.IpAddress)
-		}
-	}
-
-	for i, vip := range vips.IngressVips {
-		if vip.IpAddress != ingressVips[i].String() {
-			return fmt.Errorf("Mismatched ip for ingress. Expected: %s Actual: %s", ingressVips[i].String(), vips.IngressVip.IpAddress)
-		}
-	}
-
-	for i := 0; i < len(apiVips); i++ {
-		vipIface, _, err := config.GetVRRPConfig(apiVips[i], ingressVips[i])
-		if err != nil {
-			return err
-		}
-
-		if err = LeaseVIPs(log, cfgPath, vipIface.Name, []vip{vips.APIVips[i], vips.IngressVips[i]}); err != nil {
-			log.WithFields(logrus.Fields{
-				"cfgPath":        cfgPath,
-				"vipMasterIface": vipIface.Name,
-				"vips":           []vip{vips.APIVips[i], vips.IngressVips[i]},
-			}).WithError(err).Error("Failed to lease VIPS")
-			return err
-		}
-	}
-
-	log.WithFields(logrus.Fields{
-		"cfgPath": cfgPath,
-	}).Info("Leased VIPS successfully")
-
-	return nil
-}
-
 func mustGetNamespace() string {
 	ns := os.Getenv("POD_NAMESPACE")
 	if ns == "" {
@@ -305,10 +252,6 @@ func mustGetNamespace() string {
 func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, apiPort, lbPort uint16, interval time.Duration, platformType string, controlPlaneTopology string) error {
 	var appliedConfig, curConfig, prevConfig *config.Node
 	var configChangeCtr uint8 = 0
-
-	if err := handleLeasing(cfgPath, apiVips, ingressVips); err != nil {
-		return err
-	}
 
 	ctx, stopProcessingSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stopProcessingSignals()
