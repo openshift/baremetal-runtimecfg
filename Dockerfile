@@ -6,7 +6,7 @@ RUN GO111MODULE=on go build --mod=vendor -o build ./cmd/...
 
 FROM centos:stream9
 
-RUN yum install -y dhcp-client diffutils dbus-tools && yum clean all
+RUN yum install -y diffutils dbus-tools && yum clean all
 
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/build/* /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/* /usr/bin/
