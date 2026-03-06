@@ -6,7 +6,14 @@ RUN GO111MODULE=on go build --mod=vendor -o build ./cmd/...
 
 FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 
-RUN yum install -y dhclient diffutils dbus-tools && yum clean all
+# detect OS version to replace dhcp-client as it's been replaced on CentOS/RHEL 10
+RUN . /etc/os-release && \
+    MAJOR_VERSION=$(echo "${VERSION_ID}" | cut -d. -f1) && \
+    if [ "${MAJOR_VERSION}" = "10" ]; then \
+        yum install -y dhcpcd diffutils dbus-tools && yum clean all; \
+    else \
+        yum install -y dhcp-client diffutils dbus-tools && yum clean all; \
+    fi
 
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/build/* /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/baremetal-runtimecfg/scripts/* /usr/bin/
