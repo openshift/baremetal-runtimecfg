@@ -24,7 +24,7 @@ Note that you must pass at least one VIP for the VRRP interface to be found.
 
 ### Run on docker (recommended)
 
-Running tests inside docker are consistet between machines and it keeps the host environment clean.
+Running tests inside docker are consistent between machines, and it keeps the host environment clean.
 
 In order to run the tests you should have all these prerequisites:
 * make
@@ -45,3 +45,9 @@ Pay attention: This tests might change the machine networking.
 ```bash
 make test
 ```
+
+### NFTables functionality on non-Linux platforms
+
+NFTables will not work on non-linux platforms. NFTables functions will be called, but are dummy functions that will 
+return errors explaining this functionality will not work or will always return false in case the function normally 
+does not throw errors.
