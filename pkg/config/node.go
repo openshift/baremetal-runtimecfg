@@ -969,18 +969,30 @@ func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPa
 }
 
 func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (updatedNode Node, err error) {
+	// Track if we encounter any IPv6 addresses
+	hasIPv6 := false
 	for _, ip := range clusterLBConfig.ApiIntLBIPs {
 		node.Cluster.APIIntLBIPs = append(node.Cluster.APIIntLBIPs, ip.String())
+		if ip.To4() == nil {
+			hasIPv6 = true
+		}
 	}
 	for _, ip := range clusterLBConfig.ApiLBIPs {
 		node.Cluster.APILBIPs = append(node.Cluster.APILBIPs, ip.String())
+		if ip.To4() == nil {
+			hasIPv6 = true
+		}
 	}
 	for _, ip := range clusterLBConfig.IngressLBIPs {
 		node.Cluster.IngressLBIPs = append(node.Cluster.IngressLBIPs, ip.String())
+		if ip.To4() == nil {
+			hasIPv6 = true
+		}
 	}
+	// Set record types based on whether we have IPv6
 	node.Cluster.CloudLBRecordType = "A"
 	node.Cluster.CloudLBEmptyType = "AAAA"
-	if len(clusterLBConfig.ApiIntLBIPs) > 0 && clusterLBConfig.ApiIntLBIPs[0].To4() == nil {
+	if hasIPv6 {
 		node.Cluster.CloudLBRecordType = "AAAA"
 		node.Cluster.CloudLBEmptyType = "A"
 	}

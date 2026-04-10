@@ -204,14 +204,26 @@ var (
 	testApiIntLBIPv4      = net.ParseIP("10.10.10.20")
 	testIngressOneIPv4    = net.ParseIP("192.168.20.140")
 	testIngressTwoIPv4    = net.ParseIP("10.10.10.40")
+	testApiLBIPv6         = net.ParseIP("2001:db8::1")
+	testApiIntLBIPv6      = net.ParseIP("2001:db8::2")
+	testIngressOneIPv6    = net.ParseIP("2001:db8::3")
+	testIngressTwoIPv6    = net.ParseIP("2001:db8::4")
 	testClusterLBConfig   = ClusterLBConfig{
 		ApiLBIPs:     []net.IP{testApiLBIPv4},
 		ApiIntLBIPs:  []net.IP{testApiIntLBIPv4},
 		IngressLBIPs: []net.IP{testIngressOneIPv4, testIngressTwoIPv4}}
+	testClusterLBConfigIPv6 = ClusterLBConfig{
+		ApiLBIPs:     []net.IP{testApiLBIPv6},
+		ApiIntLBIPs:  []net.IP{testApiIntLBIPv6},
+		IngressLBIPs: []net.IP{testIngressOneIPv6, testIngressTwoIPv6}}
 	expectedApiLBIPv4      = "192.168.0.111"
 	expectedApiIntLBIPv4   = "10.10.10.20"
 	expectedIngressOneIPv4 = "192.168.20.140"
 	expectedIngressTwoIPv4 = "10.10.10.40"
+	expectedApiLBIPv6      = "2001:db8::1"
+	expectedApiIntLBIPv6   = "2001:db8::2"
+	expectedIngressOneIPv6 = "2001:db8::3"
+	expectedIngressTwoIPv6 = "2001:db8::4"
 
 	emptyLBIPs = []net.IP{}
 )
@@ -282,6 +294,45 @@ var _ = Describe("PopulateCloudLBIPAddresses", func() {
 				Expect(len(newNode.Cluster.IngressLBIPs)).To(Equal(len(emptyLBIPs)))
 				Expect(newNode.Cluster.CloudLBRecordType).To(Equal("A"))
 				Expect(err).To(BeNil())
+			})
+		})
+		Context("for IPV6 Cloud LB IPs", func() {
+			Context("with multiple Ingress LB IPs", func() {
+				It("matches IPv6 API and Ingress LB IPs", func() {
+					newNode := Node{}
+					newNode, err := PopulateCloudLBIPAddresses(testClusterLBConfigIPv6, newNode)
+					Expect(newNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv6))
+					Expect(newNode.Cluster.IngressLBIPs[1]).To(Equal(expectedIngressTwoIPv6))
+					Expect(newNode.Cluster.CloudLBRecordType).To(Equal("AAAA"))
+					Expect(newNode.Cluster.CloudLBEmptyType).To(Equal("A"))
+					Expect(err).To(BeNil())
+				})
+				It("handles mixed IPv4 in API and IPv6 in Ingress", func() {
+					newNode := Node{}
+					mixedLBConfig := ClusterLBConfig{
+						ApiLBIPs:     []net.IP{testApiLBIPv4},
+						ApiIntLBIPs:  []net.IP{testApiIntLBIPv4},
+						IngressLBIPs: []net.IP{testIngressOneIPv6}}
+					newNode, err := PopulateCloudLBIPAddresses(mixedLBConfig, newNode)
+					Expect(newNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv4))
+					Expect(newNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv6))
+					Expect(newNode.Cluster.CloudLBRecordType).To(Equal("AAAA"))
+					Expect(newNode.Cluster.CloudLBEmptyType).To(Equal("A"))
+					Expect(err).To(BeNil())
+				})
+				It("handles mixed IPv6 in API and IPv4 in Ingress", func() {
+					newNode := Node{}
+					mixedLBConfig := ClusterLBConfig{
+						ApiLBIPs:     []net.IP{testApiLBIPv6},
+						ApiIntLBIPs:  []net.IP{testApiIntLBIPv6},
+						IngressLBIPs: []net.IP{testIngressOneIPv4}}
+					newNode, err := PopulateCloudLBIPAddresses(mixedLBConfig, newNode)
+					Expect(newNode.Cluster.APILBIPs[0]).To(Equal(expectedApiLBIPv6))
+					Expect(newNode.Cluster.IngressLBIPs[0]).To(Equal(expectedIngressOneIPv4))
+					Expect(newNode.Cluster.CloudLBRecordType).To(Equal("AAAA"))
+					Expect(newNode.Cluster.CloudLBEmptyType).To(Equal("A"))
+					Expect(err).To(BeNil())
+				})
 			})
 		})
 	})
