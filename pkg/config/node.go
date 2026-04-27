@@ -753,7 +753,11 @@ func getSortedBackends(kubeconfigPath string, readFromLocalAPI bool, vips []net.
 	// After the bootstrap becomes a master node, it's ip will replace the dummy ip in the list.
 	if len(nodes.Items) == 1 &&
 		(controlPlaneTopology == highlyAvailableArbiterMode || controlPlaneTopology == dualReplicaTopologyMode) {
-		backends = append(backends, Backend{Host: "dummy", Address: "0.0.0.0"})
+		if utils.IsIPv4(vips[0]) {
+			backends = append(backends, Backend{Host: "dummy", Address: "0.0.0.0"})
+		} else {
+			backends = append(backends, Backend{Host: "dummy", Address: "::"})
+		}
 	}
 
 	sort.Slice(backends, func(i, j int) bool {
