@@ -28,6 +28,13 @@ const (
 	ovn                         = "OVNKubernetes"
 	maxSecondsToSuitableIPsLoop = 300 // 5 minutes
 	addSecondsToSuitableIPsLoop = 2
+
+	// maxDualStackWaitSeconds is the maximum additional time we wait for the
+	// second address family to appear on a dual-stack cluster. RHEL 10 enables
+	// IPv4 ACD (Address Conflict Detection) by default which delays IPv4
+	// address assignment by ~200ms-3s. During this window nodeip-configuration
+	// can see only IPv6 and incorrectly write a single-stack config.
+	maxDualStackWaitSeconds = 10
 )
 
 var nodeIPCmd = &cobra.Command{
@@ -69,6 +76,7 @@ var params struct {
 	userManagedLB bool
 	networkType   string
 	platform      string
+	dualStack     bool
 }
 
 // init executes upon import
@@ -80,6 +88,7 @@ func init() {
 	nodeIPCmd.PersistentFlags().StringVarP(&params.networkType, "network-type", "n", ovn, "CNI network type")
 	nodeIPCmd.PersistentFlags().BoolVarP(&params.userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
 	nodeIPCmd.PersistentFlags().StringVarP(&params.platform, "platform", "p", "", "Cluster platform")
+	nodeIPCmd.PersistentFlags().BoolVar(&params.dualStack, "dual-stack", false, "Cluster is configured as dual-stack (wait for both address families)")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
@@ -89,7 +98,8 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType)
+	dualStack := params.dualStack || vipsAreDualStack(vips)
+	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, dualStack)
 	if err != nil {
 		return err
 	}
@@ -114,7 +124,8 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType)
+	dualStack := params.dualStack || vipsAreDualStack(vips)
+	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, dualStack)
 	if err != nil {
 		return err
 	}
@@ -218,7 +229,7 @@ func checkAddressUsable(chosen []net.IP) (err error) {
 	return err
 }
 
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string) (chosen []net.IP, matchesVips bool, err error) {
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack bool) (chosen []net.IP, matchesVips bool, err error) {
 	// timerLoop will hold a time in Seconds to be used with time.Sleep() before going
 	// for the next loop interation.
 	timerLoop := 1
@@ -227,6 +238,11 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 	if os.Getenv("ENABLE_NODEIP_DEBUG") == "true" {
 		utils.SetDebugLogLevel()
 	}
+
+	// dualStackWaitStart tracks when we first found a single-family result in
+	// a dual-stack cluster. We allow a bounded extra wait for the second family
+	// to appear (e.g. IPv4 delayed by ACD/DAD probing on RHEL 10).
+	var dualStackWaitStart time.Time
 
 	ipFilterFunc := utils.ValidNodeAddress
 	for {
@@ -243,6 +259,13 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 					}
 					time.Sleep(time.Second)
 					continue
+				}
+				if dualStack && !hasBothIPFamilies(chosen) && retry {
+					if shouldKeepWaitingForDualStack(&dualStackWaitStart, chosen) {
+						continue
+					}
+					log.Warnf("Dual-stack cluster but only found %d address(es) after %ds wait, proceeding with what we have: %v",
+						len(chosen), maxDualStackWaitSeconds, chosen)
 				}
 				return chosen, true, err
 			}
@@ -264,6 +287,14 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 					chosen = []net.IP{}
 					time.Sleep(time.Second)
 					continue
+				}
+				if dualStack && !hasBothIPFamilies(chosen) && retry {
+					if shouldKeepWaitingForDualStack(&dualStackWaitStart, chosen) {
+						chosen = []net.IP{}
+						continue
+					}
+					log.Warnf("Dual-stack cluster but only found %d address(es) after %ds wait, proceeding with what we have: %v",
+						len(chosen), maxDualStackWaitSeconds, chosen)
 				}
 				return chosen, false, err
 			}
@@ -292,6 +323,54 @@ func parseIPs(args []string) ([]net.IP, error) {
 		log.Debugf("Parsed Virtual IP %s", ips[i])
 	}
 	return ips, nil
+}
+
+// vipsAreDualStack returns true if the given VIPs contain both IPv4 and IPv6
+// addresses, indicating that the cluster is configured as dual-stack.
+func vipsAreDualStack(vips []net.IP) bool {
+	hasIPv4, hasIPv6 := false, false
+	for _, vip := range vips {
+		if utils.IsIPv6(vip) {
+			hasIPv6 = true
+		} else {
+			hasIPv4 = true
+		}
+		if hasIPv4 && hasIPv6 {
+			return true
+		}
+	}
+	return false
+}
+
+// hasBothIPFamilies returns true if the chosen addresses contain at least one
+// IPv4 and one IPv6 address.
+func hasBothIPFamilies(addrs []net.IP) bool {
+	hasIPv4, hasIPv6 := false, false
+	for _, addr := range addrs {
+		if utils.IsIPv6(addr) {
+			hasIPv6 = true
+		} else {
+			hasIPv4 = true
+		}
+	}
+	return hasIPv4 && hasIPv6
+}
+
+// shouldKeepWaitingForDualStack decides whether to retry when we found IPs from
+// only one address family in a dual-stack cluster. It implements a bounded wait
+// of maxDualStackWaitSeconds to handle IPv4 ACD delays (RHEL 10+) without
+// blocking boot indefinitely.
+func shouldKeepWaitingForDualStack(waitStart *time.Time, chosen []net.IP) bool {
+	if waitStart.IsZero() {
+		*waitStart = time.Now()
+		log.Infof("Dual-stack cluster: found only %v, waiting up to %ds for both address families",
+			chosen, maxDualStackWaitSeconds)
+	}
+	if time.Since(*waitStart) < time.Duration(maxDualStackWaitSeconds)*time.Second {
+		time.Sleep(time.Second)
+		return true
+	}
+	return false
 }
 
 // currently we allow setting remote worker only in case of baremetal platform without external lb
