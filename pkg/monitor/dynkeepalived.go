@@ -95,7 +95,7 @@ func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node, nodeCach
 	return nil
 }
 
-func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
+func doesConfigChanged(curConfig, appliedConfig *config.Node, controlPlaneTopology string) bool {
 	validConfig := true
 	cfgChanged := appliedConfig == nil || !cmp.Equal(*appliedConfig, *curConfig)
 	// In unicast mode etcd is used for sync purpose between bootstrap and the masters nodes,
@@ -103,8 +103,10 @@ func doesConfigChanged(curConfig, appliedConfig *config.Node) bool {
 	// approach we should avoid asymetric configuration
 	if curConfig.EnableUnicast {
 		if os.Getenv("IS_BOOTSTRAP") == "no" && len(curConfig.LBConfig.Backends) < 2 {
-			log.Warnf("Invalid keepalived.conf - number of backends must be at least 2 got %d", len(curConfig.LBConfig.Backends))
-			validConfig = false
+			if controlPlaneTopology != "SingleReplica" {
+				log.Warnf("Invalid keepalived.conf - number of backends must be at least 2 got %d", len(curConfig.LBConfig.Backends))
+				validConfig = false
+			}
 		}
 	}
 	return cfgChanged && validConfig
@@ -425,7 +427,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 				continue
 			}
 			curConfig = &newConfig
-			if doesConfigChanged(curConfig, appliedConfig) {
+			if doesConfigChanged(curConfig, appliedConfig, controlPlaneTopology) {
 				if prevConfig == nil || cmp.Equal(*prevConfig, *curConfig) {
 					configChangeCtr++
 				} else {
