@@ -1,6 +1,8 @@
 module github.com/openshift/baremetal-runtimecfg
 
-go 1.25.8
+go 1.25.0
+
+toolchain go1.25.10
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
@@ -14,7 +16,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.7.0
 	github.com/vishvananda/netlink v1.1.0
-	golang.org/x/sys v0.31.0
+	golang.org/x/sys v0.45.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.33.2
 	k8s.io/apimachinery v0.33.2
@@ -68,11 +70,11 @@ require (
 	github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sync v0.12.0 // indirect
-	golang.org/x/term v0.30.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
