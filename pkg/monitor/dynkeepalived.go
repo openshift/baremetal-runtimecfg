@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -62,6 +63,15 @@ func getActualMode(cfgPath string) (error, bool) {
 	return nil, enableUnicast
 }
 
+// kubeApiReadyzClient is shared across probe calls so TLS connections can be
+// reused instead of performing a new handshake every second.
+var kubeApiReadyzClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
 // isKubeApiHealthy probes the /readyz endpoint of the local kube-apiserver.
 // Unlike a data plane request (e.g. listing nodes), /readyz starts returning
 // 500 the moment the apiserver begins its graceful shutdown, which lets us
@@ -70,18 +80,13 @@ func getActualMode(cfgPath string) (error, bool) {
 // local endpoint, not its identity (same approach as the keepalived check
 // scripts that curl -k the endpoint).
 func isKubeApiHealthy(apiPort uint16) bool {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-	resp, err := client.Get(fmt.Sprintf("https://localhost:%d/readyz", apiPort))
+	resp, err := kubeApiReadyzClient.Get(fmt.Sprintf("https://localhost:%d/readyz", apiPort))
 	if err != nil {
 		log.WithError(err).Info("isKubeApiHealthy: readyz probe failed")
 		return false
 	}
 	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode == http.StatusOK
 }
 
