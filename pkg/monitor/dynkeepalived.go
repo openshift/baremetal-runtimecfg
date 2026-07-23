@@ -2,7 +2,9 @@ package monitor
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -59,6 +61,39 @@ func getActualMode(cfgPath string) (error, bool) {
 		enableUnicast = true
 	}
 	return nil, enableUnicast
+}
+
+// kubeApiReadyzClient is shared across probe calls so TLS connections can be
+// reused instead of performing a new handshake every second.
+var kubeApiReadyzClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
+// ironicProbeClient bounds the Ironic liveness probe so a hung endpoint
+// cannot stall the bootstrap monitoring loop indefinitely.
+var ironicProbeClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
+
+// isKubeApiHealthy probes the /readyz endpoint of the local kube-apiserver.
+// Unlike a data plane request (e.g. listing nodes), /readyz starts returning
+// 500 the moment the apiserver begins its graceful shutdown, which lets us
+// detect bootstrap teardown within seconds instead of minutes (OCPBUGS-99496).
+// TLS verification is disabled because we only care about readiness of the
+// local endpoint, not its identity (same approach as the keepalived check
+// scripts that curl -k the endpoint).
+func isKubeApiHealthy(apiPort uint16) bool {
+	resp, err := kubeApiReadyzClient.Get(fmt.Sprintf("https://localhost:%d/readyz", apiPort))
+	if err != nil {
+		log.WithError(err).Debug("isKubeApiHealthy: readyz probe failed")
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode == http.StatusOK
 }
 
 func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node, nodeCache config.NodeCacheGetter) error {
@@ -148,7 +183,7 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 	return updateRequired, desiredModeInfo
 }
 
-func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState, nodeCache config.NodeCacheGetter) {
+func handleBootstrapStopKeepalived(apiPort uint16, bootstrapStopKeepalived chan APIState) {
 	consecutiveErr := 0
 
 	/* It should take up to ~20 seconds for the local kube-apiserver to start running on the
@@ -158,7 +193,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	*/
 	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
 	for start := time.Now(); time.Since(start) < time.Minute*30; {
-		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}, nodeCache); err == nil {
+		if isKubeApiHealthy(apiPort) {
 			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
 			break
 		}
@@ -167,15 +202,18 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	}
 
 	for {
-		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}, nodeCache); err != nil {
+		if !isKubeApiHealthy(apiPort) {
 			// We have started to talk to Ironic through the API VIP as well,
 			// so if Ironic is still up then we need to keep the VIP, even if
 			// the apiserver has gone down.
-			if _, err = http.Get("http://localhost:6385/v1"); err != nil {
+			if resp, err := ironicProbeClient.Get("http://localhost:6385/v1"); err != nil {
 				consecutiveErr++
 				log.WithFields(logrus.Fields{
 					"consecutiveErr": consecutiveErr,
 				}).Info("handleBootstrapStopKeepalived: detect failure on API and Ironic")
+			} else {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
 			}
 		} else {
 			if consecutiveErr > bootstrapApiFailuresThreshold { // Means it was stopped
@@ -282,8 +320,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		   so, Keepalived on bootstrap should stop running when local kube-apiserver isn't operational anymore.
 		   handleBootstrapStopKeepalived function is responsible to stop Keepalived when the condition is met. */
 
-		// Additionally, on bootstrap we don't care about caching the nodes because we don't need performance optimizations.
-		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived, nil)
+		go handleBootstrapStopKeepalived(apiPort, bootstrapStopKeepalived)
 	}
 
 	conn, err := net.Dial("unix", keepalivedControlSock)
