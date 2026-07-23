@@ -177,7 +177,7 @@ func isModeUpdateNeeded(cfgPath string) (bool, modeUpdateInfo) {
 	return updateRequired, desiredModeInfo
 }
 
-func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalived chan APIState, nodeCache config.NodeCacheGetter) {
+func handleBootstrapStopKeepalived(apiPort uint16, bootstrapStopKeepalived chan APIState) {
 	consecutiveErr := 0
 
 	/* It should take up to ~20 seconds for the local kube-apiserver to start running on the
@@ -187,7 +187,7 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	*/
 	log.Info("handleBootstrapStopKeepalived: verify first that local kube-apiserver is operational")
 	for start := time.Now(); time.Since(start) < time.Minute*30; {
-		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}, nodeCache); err == nil {
+		if isKubeApiHealthy(apiPort) {
 			log.Info("handleBootstrapStopKeepalived: local kube-apiserver is operational")
 			break
 		}
@@ -196,11 +196,11 @@ func handleBootstrapStopKeepalived(kubeconfigPath string, bootstrapStopKeepalive
 	}
 
 	for {
-		if _, err := config.GetIngressConfig(kubeconfigPath, []string{}, nodeCache); err != nil {
+		if !isKubeApiHealthy(apiPort) {
 			// We have started to talk to Ironic through the API VIP as well,
 			// so if Ironic is still up then we need to keep the VIP, even if
 			// the apiserver has gone down.
-			if _, err = http.Get("http://localhost:6385/v1"); err != nil {
+			if _, err := http.Get("http://localhost:6385/v1"); err != nil {
 				consecutiveErr++
 				log.WithFields(logrus.Fields{
 					"consecutiveErr": consecutiveErr,
@@ -311,8 +311,7 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		   so, Keepalived on bootstrap should stop running when local kube-apiserver isn't operational anymore.
 		   handleBootstrapStopKeepalived function is responsible to stop Keepalived when the condition is met. */
 
-		// Additionally, on bootstrap we don't care about caching the nodes because we don't need performance optimizations.
-		go handleBootstrapStopKeepalived(kubeconfigPath, bootstrapStopKeepalived, nil)
+		go handleBootstrapStopKeepalived(apiPort, bootstrapStopKeepalived)
 	}
 
 	conn, err := net.Dial("unix", keepalivedControlSock)
