@@ -72,6 +72,12 @@ var kubeApiReadyzClient = &http.Client{
 	},
 }
 
+// ironicProbeClient bounds the Ironic liveness probe so a hung endpoint
+// cannot stall the bootstrap monitoring loop indefinitely.
+var ironicProbeClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
+
 // isKubeApiHealthy probes the /readyz endpoint of the local kube-apiserver.
 // Unlike a data plane request (e.g. listing nodes), /readyz starts returning
 // 500 the moment the apiserver begins its graceful shutdown, which lets us
@@ -82,7 +88,7 @@ var kubeApiReadyzClient = &http.Client{
 func isKubeApiHealthy(apiPort uint16) bool {
 	resp, err := kubeApiReadyzClient.Get(fmt.Sprintf("https://localhost:%d/readyz", apiPort))
 	if err != nil {
-		log.WithError(err).Info("isKubeApiHealthy: readyz probe failed")
+		log.WithError(err).Debug("isKubeApiHealthy: readyz probe failed")
 		return false
 	}
 	defer resp.Body.Close()
@@ -200,11 +206,14 @@ func handleBootstrapStopKeepalived(apiPort uint16, bootstrapStopKeepalived chan 
 			// We have started to talk to Ironic through the API VIP as well,
 			// so if Ironic is still up then we need to keep the VIP, even if
 			// the apiserver has gone down.
-			if _, err := http.Get("http://localhost:6385/v1"); err != nil {
+			if resp, err := ironicProbeClient.Get("http://localhost:6385/v1"); err != nil {
 				consecutiveErr++
 				log.WithFields(logrus.Fields{
 					"consecutiveErr": consecutiveErr,
 				}).Info("handleBootstrapStopKeepalived: detect failure on API and Ironic")
+			} else {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
 			}
 		} else {
 			if consecutiveErr > bootstrapApiFailuresThreshold { // Means it was stopped
