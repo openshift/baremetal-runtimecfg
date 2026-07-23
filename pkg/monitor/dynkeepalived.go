@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -59,6 +60,29 @@ func getActualMode(cfgPath string) (error, bool) {
 		enableUnicast = true
 	}
 	return nil, enableUnicast
+}
+
+// isKubeApiHealthy probes the /readyz endpoint of the local kube-apiserver.
+// Unlike a data plane request (e.g. listing nodes), /readyz starts returning
+// 500 the moment the apiserver begins its graceful shutdown, which lets us
+// detect bootstrap teardown within seconds instead of minutes (OCPBUGS-99496).
+// TLS verification is disabled because we only care about readiness of the
+// local endpoint, not its identity (same approach as the keepalived check
+// scripts that curl -k the endpoint).
+func isKubeApiHealthy(apiPort uint16) bool {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	resp, err := client.Get(fmt.Sprintf("https://localhost:%d/readyz", apiPort))
+	if err != nil {
+		log.WithError(err).Info("isKubeApiHealthy: readyz probe failed")
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func updateUnicastConfig(kubeconfigPath string, newConfig *config.Node, nodeCache config.NodeCacheGetter) error {
