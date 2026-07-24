@@ -99,6 +99,36 @@ type ClusterLBConfig struct {
 	IngressLBIPs []net.IP
 }
 
+// FRRPeer defines a BGP peer for FRR configuration rendering.
+type FRRPeer struct {
+	PeerAddress   string `json:"peerAddress"`
+	PeerASN       int64  `json:"peerASN"`
+	Password      string `json:"password,omitempty"`
+	BFDEnabled    string `json:"bfdEnabled,omitempty"`
+	EBGPMultiHop  string `json:"ebgpMultiHop,omitempty"`
+	HoldTime      string `json:"holdTime,omitempty"`
+	KeepaliveTime string `json:"keepaliveTime,omitempty"`
+}
+
+// FRRPeerMapping represents the per-node BGP peer mapping file (frr-peers.json).
+// It contains a default peer list and optional per-host overrides keyed by hostname.
+type FRRPeerMapping struct {
+	LocalASN      int64                `json:"localASN"`
+	DefaultPeers  []FRRPeer            `json:"defaultPeers"`
+	HostOverrides map[string][]FRRPeer `json:"hostOverrides,omitempty"`
+	Communities   []string             `json:"communities,omitempty"`
+}
+
+// FRRRenderConfig is the template data context for rendering frr.conf.
+// Field names match what the frr.conf.tmpl template expects.
+type FRRRenderConfig struct {
+	Hostname    string
+	RouterID    string
+	LocalASN    int64
+	Peers       []FRRPeer
+	Communities []string
+}
+
 func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
 	dnsFile, err := os.Open(resolvConfPath)
 	if err != nil {
@@ -985,4 +1015,38 @@ func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (upd
 		node.Cluster.CloudLBEmptyType = "A"
 	}
 	return node, nil
+}
+
+// LoadFRRPeerMapping reads a frr-peers.json file and returns the parsed mapping.
+func LoadFRRPeerMapping(path string) (*FRRPeerMapping, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read peer mapping file %s: %v", path, err)
+	}
+	var mapping FRRPeerMapping
+	if err := json.Unmarshal(data, &mapping); err != nil {
+		return nil, fmt.Errorf("failed to parse peer mapping file %s: %v", path, err)
+	}
+	return &mapping, nil
+}
+
+// ResolveFRRPeers returns the BGP peers for the given hostname.
+// If a host-specific override exists, it is used; otherwise the default peers are returned.
+func (m *FRRPeerMapping) ResolveFRRPeers(hostname string) []FRRPeer {
+	if peers, ok := m.HostOverrides[hostname]; ok {
+		return peers
+	}
+	return m.DefaultPeers
+}
+
+// BuildFRRRenderConfig creates the template data context for FRR config rendering
+// from a Node and peer mapping.
+func BuildFRRRenderConfig(node Node, mapping *FRRPeerMapping) FRRRenderConfig {
+	return FRRRenderConfig{
+		Hostname:    node.ShortHostname,
+		RouterID:    node.NonVirtualIP,
+		LocalASN:    mapping.LocalASN,
+		Peers:       mapping.ResolveFRRPeers(node.ShortHostname),
+		Communities: mapping.Communities,
+	}
 }
