@@ -101,11 +101,16 @@ type ClusterLBConfig struct {
 
 // FRRPeer defines a BGP peer for FRR configuration rendering.
 type FRRPeer struct {
-	PeerAddress   string `json:"peerAddress"`
-	PeerASN       int64  `json:"peerASN"`
-	Password      string `json:"password,omitempty"`
-	BFDEnabled    string `json:"bfdEnabled,omitempty"`
-	EBGPMultiHop  string `json:"ebgpMultiHop,omitempty"`
+	PeerAddress string `json:"peerAddress"`
+	PeerASN     int64  `json:"peerASN"`
+	Password    string `json:"password,omitempty"`
+	// Port is the BGP session TCP port; 0 means the default (179).
+	Port         int32  `json:"port,omitempty"`
+	BFDEnabled   string `json:"bfdEnabled,omitempty"`
+	EBGPMultiHop string `json:"ebgpMultiHop,omitempty"`
+	// HoldTime and KeepaliveTime are whole seconds as decimal strings
+	// (e.g. "90"), matching FRR's "timers <keepalive> <hold>" syntax.
+	// Producers must set both or neither.
 	HoldTime      string `json:"holdTime,omitempty"`
 	KeepaliveTime string `json:"keepaliveTime,omitempty"`
 }
