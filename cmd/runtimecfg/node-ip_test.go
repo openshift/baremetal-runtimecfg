@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -270,5 +271,50 @@ var _ = Describe("getSuitableIPsInternal", func() {
 			Expect(f.routingCalls).To(Equal(singleFamilyRounds + 1))
 			Expect(f.defaultCalls).To(Equal(0))
 		})
+	})
+})
+
+// fakeProbe records the addresses checkAddressUsableInternal probes and returns
+// scripted errors, so usability checking can be tested without real sockets.
+type fakeProbe struct {
+	calls  []string
+	errFor map[string]error
+}
+
+func (p *fakeProbe) probe(ip net.IP) error {
+	p.calls = append(p.calls, ip.String())
+	return p.errFor[ip.String()]
+}
+
+var _ = Describe("checkAddressUsableInternal", func() {
+	ipv4 := net.ParseIP("10.0.0.5")
+	ipv6 := net.ParseIP("fd00::5")
+
+	It("does not probe when only IPv4 is present", func() {
+		p := &fakeProbe{}
+		Expect(checkAddressUsableInternal([]net.IP{ipv4}, p.probe)).To(Succeed())
+		Expect(p.calls).To(BeEmpty())
+	})
+
+	It("probes the IPv6 address even when IPv4 comes first", func() {
+		p := &fakeProbe{}
+		Expect(checkAddressUsableInternal([]net.IP{ipv4, ipv6}, p.probe)).To(Succeed())
+		Expect(p.calls).To(Equal([]string{ipv6.String()}))
+	})
+
+	It("returns an error when a non-first IPv6 address is unusable", func() {
+		// Regression: the previous implementation only probed chosen[0], so a
+		// tentative IPv6 selected as the second family (IPv4 preferred first)
+		// slipped through and could be written into the kubelet config.
+		p := &fakeProbe{errFor: map[string]error{ipv6.String(): errors.New("cannot assign requested address")}}
+		err := checkAddressUsableInternal([]net.IP{ipv4, ipv6}, p.probe)
+		Expect(err).To(HaveOccurred())
+		Expect(p.calls).To(Equal([]string{ipv6.String()}))
+	})
+
+	It("returns nil when every IPv6 address is usable", func() {
+		p := &fakeProbe{}
+		Expect(checkAddressUsableInternal([]net.IP{ipv6, ipv4}, p.probe)).To(Succeed())
+		Expect(p.calls).To(Equal([]string{ipv6.String()}))
 	})
 })

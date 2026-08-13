@@ -207,22 +207,45 @@ func writeToFile(path string, data string) error {
 	return nil
 }
 
-func checkAddressUsable(chosen []net.IP) (err error) {
-	// If using IPv6, verify that the choosen address isn't tentative
-	// i.e. we can actually bind to it
-	if len(chosen) > 0 && net.IPv6len == len(chosen[0]) {
-		var listener net.Listener
-		listener, err = net.Listen("tcp", "["+chosen[0].String()+"]:")
-		if err != nil {
-			log.Errorf("Chosen node IP is not usable")
+// checkAddressUsable verifies that every chosen IPv6 address is usable, i.e. it
+// is not tentative and we can actually bind to it. IPv4 addresses have no
+// tentative state, so they are skipped. On a dual-stack node IPv4 is preferred
+// by default and therefore comes first, so the IPv6 address to validate is
+// usually chosen[1]; we must check all chosen addresses, not just the first.
+func checkAddressUsable(chosen []net.IP) error {
+	return checkAddressUsableInternal(chosen, probeListen)
+}
+
+// probeListen reports whether we can bind to ip (i.e. it is not tentative) by
+// opening and immediately closing a listener on it.
+func probeListen(ip net.IP) error {
+	listener, err := net.Listen("tcp", "["+ip.String()+"]:")
+	if err != nil {
+		return err
+	}
+	// Close the probe listener so we don't leak the socket/fd; this runs on
+	// every retry (e.g. once per second while waiting for the second address
+	// family on a dual-stack cluster). A close failure does not make the
+	// address unusable, so only log it.
+	if cerr := listener.Close(); cerr != nil {
+		log.Warnf("Failed to close probe listener for %s: %v", ip, cerr)
+	}
+	return nil
+}
+
+func checkAddressUsableInternal(chosen []net.IP, probe func(net.IP) error) error {
+	for _, ip := range chosen {
+		// IPv4 (including IPv4 ACD) does not use a tentative state, so only
+		// IPv6 addresses need the bind probe.
+		if !utils.IsIPv6(ip) {
+			continue
+		}
+		if err := probe(ip); err != nil {
+			log.Errorf("Chosen node IP %s is not usable", ip)
 			return err
 		}
-		// Close the probe listener so we don't leak the socket/fd. This
-		// function can be called on every retry (e.g. once per second while
-		// waiting for the second address family on a dual-stack cluster).
-		listener.Close()
 	}
-	return err
+	return nil
 }
 
 // ipDiscoverer bundles the address-discovery and helper functions used by
