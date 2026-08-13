@@ -3,8 +3,10 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -18,7 +20,18 @@ var extLen = len(ext)
 var log = logrus.New()
 
 func RenderFile(renderPath, templatePath string, cfg interface{}) error {
-	tmpl, err := template.ParseFiles(templatePath)
+	funcMap := template.FuncMap{
+		"isIPv4": func(addr string) bool {
+			ip := net.ParseIP(addr)
+			return ip != nil && ip.To4() != nil
+		},
+		"isIPv6": func(addr string) bool {
+			ip := net.ParseIP(addr)
+			return ip != nil && ip.To4() == nil
+		},
+	}
+	name := filepath.Base(templatePath)
+	tmpl, err := template.New(name).Funcs(funcMap).ParseFiles(templatePath)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"path": templatePath,

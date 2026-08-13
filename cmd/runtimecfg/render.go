@@ -36,6 +36,7 @@ func init() {
 	renderCmd.Flags().IPSlice("cloud-int-lb-ips", nil, "IP Addresses of Cloud Internal Load Balancers for OpenShift Internal API")
 	renderCmd.Flags().IPSlice("cloud-ingress-lb-ips", nil, "IP Addresses of Cloud Ingress Load Balancers")
 	renderCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
+	renderCmd.Flags().String("peer-file", "", "Path to frr-peers.json for FRR config rendering. When set, templates receive FRR-specific data (Hostname, RouterID, LocalASN, Peers, Communities) instead of the standard Node struct.")
 	rootCmd.AddCommand(renderCmd)
 }
 
@@ -110,7 +111,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	}
 
 	clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
-	config, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType, "")
+	cfg, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType, "")
 	if err != nil {
 		return err
 	}
@@ -127,5 +128,16 @@ func runRender(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return render.Render(outDir, args[1:], config)
+	// Check if FRR peer file is provided for FRR config rendering
+	peerFilePath, _ := cmd.Flags().GetString("peer-file")
+	if peerFilePath != "" {
+		peerMapping, err := config.LoadFRRPeerMapping(peerFilePath)
+		if err != nil {
+			return err
+		}
+		frrConfig := config.BuildFRRRenderConfig(cfg, peerMapping)
+		return render.Render(outDir, args[1:], frrConfig)
+	}
+
+	return render.Render(outDir, args[1:], cfg)
 }
