@@ -331,6 +331,10 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 	for {
 		select {
 		case <-ctx.Done():
+			// The node may be rebooting/shutting down: make sure no
+			// stale VIP survives into the shutdown window
+			// (OCPBUGS-109633). No-op if only the pod is restarting.
+			handleShutdownResign(conn, append(append([]net.IP{}, apiVips...), ingressVips...))
 			return nil
 
 		case APIStateChanged := <-bootstrapStopKeepalived:

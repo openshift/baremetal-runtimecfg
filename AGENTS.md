@@ -116,6 +116,7 @@ dynkeepalived path_to_kubeconfig path_to_keepalived_cfg_template path_to_config
 - Manages Virtual IP configurations for API and Ingress
 - Supports different control plane topologies
 - Handles multiple VIPs
+- On SIGTERM, if the host itself is shutting down (not just the pod restarting), makes sure no VIP stays configured on the node: requests a clean keepalived stop and force-removes the VIPs as a fallback, so client traffic cannot be routed to the local draining kube-apiserver (OCPBUGS-109633)
 
 ---
 
