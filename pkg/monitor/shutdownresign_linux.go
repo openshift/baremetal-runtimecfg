@@ -3,6 +3,7 @@
 package monitor
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -35,6 +36,14 @@ var (
 	// resignQuietPolls is how many consecutive polls must find no VIP
 	// before the force-removal phase declares the VIPs gone for good.
 	resignQuietPolls = 3
+	// hostStateCheckTimeout bounds the systemctl host-state query. If the
+	// host's systemd/dbus is wedged the query could otherwise hang forever,
+	// stalling the entire deferred resign. On timeout the state is unknown
+	// and we conservatively skip the resign; keepalived's own SIGTERM
+	// handling and the MCO shutdown unit remain as backstops. Total worst
+	// case stays bounded: 5s + resignStopWait + resignFightDuration = 45s,
+	// below the pod's 65s deletionGracePeriodSeconds.
+	hostStateCheckTimeout = 5 * time.Second
 )
 
 // Stubbed in unit tests.
@@ -64,9 +73,21 @@ func hostStateIsStopping(out []byte, err error) bool {
 // shut down or rebooted. The keepalived-monitor container mounts the host
 // filesystem at /host and runs with CAP_SYS_CHROOT, so we can ask the host's
 // systemd directly. The chroot binary path is pinned so a PATH change cannot
-// silently disable the check.
+// silently disable the check, and the query is bounded by
+// hostStateCheckTimeout so a wedged systemd/dbus cannot stall the resign.
 func isHostShuttingDown() bool {
-	out, err := exec.Command("/usr/sbin/chroot", "/host", "systemctl", "is-system-running").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), hostStateCheckTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/sbin/chroot", "/host", "systemctl", "is-system-running")
+	// Even after the context kills systemctl, Output() would keep waiting
+	// for the stdout pipe if a grandchild inherited it; WaitDelay bounds
+	// that wait too.
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		log.Warn("handleShutdownResign: host state query timed out, assuming the host is not shutting down")
+		return false
+	}
 	return hostStateIsStopping(out, err)
 }
 
