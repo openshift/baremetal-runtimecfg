@@ -207,17 +207,19 @@ func writeToFile(path string, data string) error {
 	return nil
 }
 
-// checkAddressUsable verifies that every chosen IPv6 address is usable, i.e. it
-// is not tentative and we can actually bind to it. IPv6 needs this because DAD
-// leaves an address tentative until it completes; IPv4 has no tentative state
-// (IPv4 ACD withholds the address entirely rather than exposing a tentative
-// one), so IPv4 addresses are skipped.
+// checkAddressUsable verifies that the primary node IP (chosen[0]) is usable,
+// i.e. if it is IPv6 it is not still tentative. crio and kubelet bind to this
+// address (CONTAINER_STREAM_ADDRESS / KUBELET_NODE_IP); binding to a tentative
+// IPv6 fails and historically crashed crio (bug 2099794). IPv4 has no tentative
+// state (IPv4 ACD withholds the address entirely rather than exposing a
+// tentative one), so an IPv4 primary needs no check.
 //
-// Every chosen address is checked regardless of ordering. In a dual-stack
-// cluster neither family is "primary" by default: the order of chosen is
-// determined by the install-time network configuration (and --prefer-ipv6), so
-// the IPv6 address may appear at any position. We must not assume it is
-// chosen[0], nor that IPv4 comes first.
+// Only the primary is validated: crio binds solely to chosen[0], and whichever
+// family is primary (decided by the install-time network configuration and
+// --prefer-ipv6) is always at chosen[0], so a tentative primary IPv6 is caught
+// in every stack layout. A briefly tentative secondary IPv6 is not bound by
+// crio, resolves once DAD completes, and is re-checked later by
+// wait-for-node-ip.service, so it needs no probe here.
 func checkAddressUsable(chosen []net.IP) error {
 	return checkAddressUsableInternal(chosen, probeListen)
 }
@@ -240,16 +242,14 @@ func probeListen(ip net.IP) error {
 }
 
 func checkAddressUsableInternal(chosen []net.IP, probe func(net.IP) error) error {
-	for _, ip := range chosen {
-		// IPv4 (including IPv4 ACD) does not use a tentative state, so only
-		// IPv6 addresses need the bind probe.
-		if !utils.IsIPv6(ip) {
-			continue
-		}
-		if err := probe(ip); err != nil {
-			log.Errorf("Chosen node IP %s is not usable", ip)
-			return err
-		}
+	// Only the primary node IP (chosen[0]) is bound by crio/kubelet, and only
+	// IPv6 can be tentative, so that is all we validate here.
+	if len(chosen) == 0 || !utils.IsIPv6(chosen[0]) {
+		return nil
+	}
+	if err := probe(chosen[0]); err != nil {
+		log.Errorf("Chosen node IP %s is not usable", chosen[0])
+		return err
 	}
 	return nil
 }

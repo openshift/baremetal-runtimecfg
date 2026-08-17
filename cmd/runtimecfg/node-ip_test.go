@@ -289,57 +289,42 @@ func (p *fakeProbe) probe(ip net.IP) error {
 var _ = Describe("checkAddressUsableInternal", func() {
 	ipv4 := net.ParseIP("10.0.0.5")
 	ipv6 := net.ParseIP("fd00::5")
-	ipv6b := net.ParseIP("fd00::6")
 
-	It("does not probe when only IPv4 is present", func() {
+	It("does not probe an IPv4 primary (IPv4 single stack)", func() {
 		p := &fakeProbe{}
 		Expect(checkAddressUsableInternal([]net.IP{ipv4}, p.probe)).To(Succeed(),
-			"IPv4-only input must be usable without any probe")
-		Expect(p.calls).To(BeEmpty(), "IPv4 addresses must not be probed, recorded calls: %v", p.calls)
+			"an IPv4 primary has no tentative state and needs no probe")
+		Expect(p.calls).To(BeEmpty(), "an IPv4 primary must not be probed, recorded calls: %v", p.calls)
 	})
 
-	It("probes the IPv6 address even when IPv4 comes first", func() {
-		p := &fakeProbe{}
-		Expect(checkAddressUsableInternal([]net.IP{ipv4, ipv6}, p.probe)).To(Succeed(),
-			"a usable IPv6 following IPv4 must be accepted")
-		Expect(p.calls).To(Equal([]string{ipv6.String()}),
-			"only the IPv6 address must be probed, recorded calls: %v", p.calls)
-	})
-
-	It("probes every IPv6 address, not just the first", func() {
-		p := &fakeProbe{}
-		Expect(checkAddressUsableInternal([]net.IP{ipv4, ipv6, ipv6b}, p.probe)).To(Succeed(),
-			"all usable IPv6 addresses must be accepted")
-		Expect(p.calls).To(Equal([]string{ipv6.String(), ipv6b.String()}),
-			"every IPv6 address must be probed in order, recorded calls: %v", p.calls)
-	})
-
-	It("returns an error when a non-first IPv6 address is unusable", func() {
-		// Regression: the previous implementation only probed chosen[0], so a
-		// tentative IPv6 that was not ordered first (here it follows IPv4)
-		// slipped through and could be written into the kubelet config.
+	It("does not probe the secondary IPv6 when the primary is IPv4 (v4-primary dual stack)", func() {
+		// crio binds only to chosen[0]; a tentative secondary IPv6 is not our
+		// concern here (DAD resolves it and wait-for-node-ip re-checks it).
 		p := &fakeProbe{errFor: map[string]error{ipv6.String(): errors.New("cannot assign requested address")}}
-		err := checkAddressUsableInternal([]net.IP{ipv4, ipv6}, p.probe)
-		Expect(err).To(HaveOccurred(), "an unusable IPv6 following IPv4 must be reported")
-		Expect(p.calls).To(Equal([]string{ipv6.String()}),
-			"the unusable IPv6 must have been probed, recorded calls: %v", p.calls)
+		Expect(checkAddressUsableInternal([]net.IP{ipv4, ipv6}, p.probe)).To(Succeed(),
+			"a tentative secondary IPv6 must not fail the primary usability check")
+		Expect(p.calls).To(BeEmpty(), "only the primary is probed, recorded calls: %v", p.calls)
 	})
 
-	It("returns an error when a later IPv6 address is unusable", func() {
-		// Guards the "probe every IPv6" contract: a regression that stopped
-		// after the first IPv6 would miss an unusable second IPv6.
-		p := &fakeProbe{errFor: map[string]error{ipv6b.String(): errors.New("cannot assign requested address")}}
-		err := checkAddressUsableInternal([]net.IP{ipv4, ipv6, ipv6b}, p.probe)
-		Expect(err).To(HaveOccurred(), "an unusable later IPv6 must be reported")
-		Expect(p.calls).To(Equal([]string{ipv6.String(), ipv6b.String()}),
-			"both IPv6 addresses must be probed before failing, recorded calls: %v", p.calls)
-	})
-
-	It("returns nil when every IPv6 address is usable", func() {
+	It("probes an IPv6 primary (v6 single stack / v6-primary dual stack)", func() {
 		p := &fakeProbe{}
 		Expect(checkAddressUsableInternal([]net.IP{ipv6, ipv4}, p.probe)).To(Succeed(),
-			"a usable IPv6 preceding IPv4 must be accepted")
+			"a usable IPv6 primary must be accepted")
 		Expect(p.calls).To(Equal([]string{ipv6.String()}),
-			"only the IPv6 address must be probed, recorded calls: %v", p.calls)
+			"only the primary IPv6 must be probed, recorded calls: %v", p.calls)
+	})
+
+	It("returns an error when the primary IPv6 is tentative/unusable", func() {
+		p := &fakeProbe{errFor: map[string]error{ipv6.String(): errors.New("cannot assign requested address")}}
+		err := checkAddressUsableInternal([]net.IP{ipv6, ipv4}, p.probe)
+		Expect(err).To(HaveOccurred(), "an unusable primary IPv6 must be reported")
+		Expect(p.calls).To(Equal([]string{ipv6.String()}),
+			"the primary IPv6 must have been probed, recorded calls: %v", p.calls)
+	})
+
+	It("does nothing for an empty address list", func() {
+		p := &fakeProbe{}
+		Expect(checkAddressUsableInternal(nil, p.probe)).To(Succeed(), "empty input must be a no-op")
+		Expect(p.calls).To(BeEmpty(), "empty input must not be probed, recorded calls: %v", p.calls)
 	})
 })
