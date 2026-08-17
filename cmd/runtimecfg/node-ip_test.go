@@ -316,7 +316,7 @@ var _ = Describe("checkAddressUsableInternal", func() {
 
 	It("returns an error when a non-first IPv6 address is unusable", func() {
 		// Regression: the previous implementation only probed chosen[0], so a
-		// tentative IPv6 selected as the second family (IPv4 preferred first)
+		// tentative IPv6 that was not ordered first (here it follows IPv4)
 		// slipped through and could be written into the kubelet config.
 		p := &fakeProbe{errFor: map[string]error{ipv6.String(): errors.New("cannot assign requested address")}}
 		err := checkAddressUsableInternal([]net.IP{ipv4, ipv6}, p.probe)

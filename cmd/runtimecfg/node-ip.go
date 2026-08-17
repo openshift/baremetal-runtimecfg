@@ -208,10 +208,16 @@ func writeToFile(path string, data string) error {
 }
 
 // checkAddressUsable verifies that every chosen IPv6 address is usable, i.e. it
-// is not tentative and we can actually bind to it. IPv4 addresses have no
-// tentative state, so they are skipped. On a dual-stack node IPv4 is preferred
-// by default and therefore comes first, so the IPv6 address to validate is
-// usually chosen[1]; we must check all chosen addresses, not just the first.
+// is not tentative and we can actually bind to it. IPv6 needs this because DAD
+// leaves an address tentative until it completes; IPv4 has no tentative state
+// (IPv4 ACD withholds the address entirely rather than exposing a tentative
+// one), so IPv4 addresses are skipped.
+//
+// Every chosen address is checked regardless of ordering. In a dual-stack
+// cluster neither family is "primary" by default: the order of chosen is
+// determined by the install-time network configuration (and --prefer-ipv6), so
+// the IPv6 address may appear at any position. We must not assume it is
+// chosen[0], nor that IPv4 comes first.
 func checkAddressUsable(chosen []net.IP) error {
 	return checkAddressUsableInternal(chosen, probeListen)
 }
@@ -224,7 +230,7 @@ func probeListen(ip net.IP) error {
 		return err
 	}
 	// Close the probe listener so we don't leak the socket/fd; this runs on
-	// every retry (e.g. once per second while waiting for the second address
+	// every retry (e.g. once per second while waiting for the other address
 	// family on a dual-stack cluster). A close failure does not make the
 	// address unusable, so only log it.
 	if cerr := listener.Close(); cerr != nil {
@@ -265,11 +271,11 @@ type ipDiscoverer struct {
 // configuration.
 //
 // LIMITATION: split-NIC dual-stack node IPs are NOT supported. On the VIP path
-// the second family is only discovered when it shares the SAME interface as the
-// VIP-matching address (see utils.AddressesRouting). If a node's IPv4 and IPv6
-// node IPs live on different interfaces, only one family is found and the node
-// will wait for the second family indefinitely. Dual-stack node IPs are
-// expected to share a single interface (typically br-ex).
+// the opposite family is only discovered when it shares the SAME interface as
+// the VIP-matching address (see utils.AddressesRouting). If a node's IPv4 and
+// IPv6 node IPs live on different interfaces, only one family is found and the
+// node will wait for the missing family indefinitely. Dual-stack node IPs are
+// expected to share a single interface.
 func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack bool) (chosen []net.IP, matchesVips bool, err error) {
 	return getSuitableIPsInternal(retry, vips, preferIPv6, networkType, dualStack, ipDiscoverer{
 		routing:   utils.AddressesRouting,
@@ -298,7 +304,7 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 
 	// dualStackWaitStart records when we first found a single-family result in a
 	// dual-stack cluster; lastHeartbeat throttles the periodic "still waiting"
-	// log. Both are used solely for logging while we wait for the second family.
+	// log. Both are used solely for logging while we wait for the missing family.
 	var dualStackWaitStart, lastHeartbeat time.Time
 
 	ipFilterFunc := utils.ValidNodeAddress
