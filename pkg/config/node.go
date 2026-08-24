@@ -90,7 +90,12 @@ type Node struct {
 	DNSUpstreams  []string
 	IngressConfig IngressConfig
 	EnableUnicast bool
-	Configs       *[]Node
+	// BlockExternalDNS gates the nftables rules that restrict CoreDNS to
+	// node-local access. It is currently populated from a placeholder env var
+	// (COREDNS_BLOCK_EXTERNAL_ACCESS) and will later be driven by a dedicated
+	// OpenShift API field.
+	BlockExternalDNS bool
+	Configs          *[]Node
 }
 
 type ClusterLBConfig struct {
@@ -707,6 +712,14 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 	node.EnableUnicast = false
 	if os.Getenv("ENABLE_UNICAST") == "yes" {
 		node.EnableUnicast = true
+	}
+
+	// Placeholder for the future OpenShift API field that controls whether
+	// external access to CoreDNS is blocked. When that field lands, only this
+	// population source changes; consumers keep reading node.BlockExternalDNS.
+	node.BlockExternalDNS = false
+	if os.Getenv("COREDNS_BLOCK_EXTERNAL_ACCESS") == "yes" {
+		node.BlockExternalDNS = true
 	}
 
 	resolvConfUpstreams, err := getDNSUpstreams(resolvConfPath)
