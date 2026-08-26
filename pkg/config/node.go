@@ -952,20 +952,59 @@ func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPa
 	if err != nil {
 		return node, err
 	}
-	// Extract only useful upstream addresses
-	node.DNSUpstreams = make([]string, 0)
-	for _, upstream := range resolvConfUpstreams {
-		if upstream != "127.0.0.1" && upstream != "::1" {
-			log.Infof("Adding %s as DNS Upstream", upstream)
-			node.DNSUpstreams = append(node.DNSUpstreams, upstream)
-		}
+	// On cloud platforms with UserProvisionedDNS, the update-dns-server service
+	// injects the node's own IP into NetworkManager's DNS configuration so that
+	// the node resolves api/api-int/*.apps via the local CoreDNS static pod.
+	// As a result the node's own IP appears in every resolv.conf NetworkManager
+	// generates (both /etc/resolv.conf and /var/run/NetworkManager/resolv.conf).
+	// A hostNetwork CoreDNS must never forward to itself, so exclude the node's
+	// own addresses from the upstreams to avoid a resolution loop.
+	nodeAddrs, err := utils.AddressesDefault(false, utils.ValidNodeAddress)
+	if err != nil {
+		// Don't fail rendering over an inability to enumerate local addresses;
+		// fall back to filtering loopback only.
+		log.Warningf("Failed to determine node addresses, DNS upstreams will only be filtered for loopback: %s", err)
+		nodeAddrs = nil
 	}
+	node.DNSUpstreams = filterDNSUpstreams(resolvConfUpstreams, nodeAddrs)
 	// Having no DNS Upstream servers is invalid. Return error so init
 	// container can retry.
 	if len(node.DNSUpstreams) < 1 {
 		return node, errors.New("No upstream DNS servers found")
 	}
 	return node, nil
+}
+
+// filterDNSUpstreams returns the resolv.conf nameservers that are valid CoreDNS
+// forward upstreams, dropping unparseable entries, loopback addresses, and any
+// of the node's own addresses. A hostNetwork CoreDNS listening on the node IP
+// would loop if it forwarded queries back to that same address, so those
+// entries are removed.
+func filterDNSUpstreams(resolvConfUpstreams []string, nodeAddrs []net.IP) []string {
+	upstreams := make([]string, 0)
+	for _, upstream := range resolvConfUpstreams {
+		upstreamIP := net.ParseIP(upstream)
+		if upstreamIP == nil {
+			continue
+		}
+		if upstreamIP.IsLoopback() {
+			continue
+		}
+		isNodeAddr := false
+		for _, addr := range nodeAddrs {
+			if addr.Equal(upstreamIP) {
+				isNodeAddr = true
+				break
+			}
+		}
+		if isNodeAddr {
+			log.Infof("Skipping node-local address %s as DNS upstream", upstream)
+			continue
+		}
+		log.Infof("Adding %s as DNS Upstream", upstream)
+		upstreams = append(upstreams, upstream)
+	}
+	return upstreams
 }
 
 func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (updatedNode Node, err error) {
