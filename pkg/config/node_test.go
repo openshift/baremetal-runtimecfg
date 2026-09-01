@@ -504,6 +504,46 @@ var _ = Describe("isOnPremPlatform", func() {
 	})
 })
 
+var _ = Describe("filterDNSUpstreams", func() {
+	nodeAddrs := []net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}
+
+	It("keeps real upstreams unchanged", func() {
+		upstreams := filterDNSUpstreams([]string{"169.254.169.254", "8.8.8.8"}, nodeAddrs)
+		Expect(upstreams).To(Equal([]string{"169.254.169.254", "8.8.8.8"}))
+	})
+
+	It("drops the node's own IPv4 and IPv6 addresses", func() {
+		upstreams := filterDNSUpstreams([]string{"10.0.0.5", "168.63.129.16", "fd00::5"}, nodeAddrs)
+		Expect(upstreams).To(Equal([]string{"168.63.129.16"}))
+	})
+
+	It("drops IPv4 and IPv6 loopback addresses", func() {
+		upstreams := filterDNSUpstreams([]string{"127.0.0.1", "127.0.0.53", "::1", "8.8.8.8"}, nodeAddrs)
+		Expect(upstreams).To(Equal([]string{"8.8.8.8"}))
+	})
+
+	It("drops unparseable entries", func() {
+		upstreams := filterDNSUpstreams([]string{"not-an-ip", "8.8.8.8"}, nodeAddrs)
+		Expect(upstreams).To(Equal([]string{"8.8.8.8"}))
+	})
+
+	It("matches node addresses regardless of textual form", func() {
+		upstreams := filterDNSUpstreams([]string{"fd00:0:0:0:0:0:0:5", "8.8.8.8"}, nodeAddrs)
+		Expect(upstreams).To(Equal([]string{"8.8.8.8"}))
+	})
+
+	It("returns an empty (non-nil) slice when everything is filtered", func() {
+		upstreams := filterDNSUpstreams([]string{"10.0.0.5", "127.0.0.1"}, nodeAddrs)
+		Expect(upstreams).NotTo(BeNil())
+		Expect(upstreams).To(BeEmpty())
+	})
+
+	It("filters loopback only when node addresses are unavailable", func() {
+		upstreams := filterDNSUpstreams([]string{"10.0.0.5", "127.0.0.1", "8.8.8.8"}, nil)
+		Expect(upstreams).To(Equal([]string{"10.0.0.5", "8.8.8.8"}))
+	})
+})
+
 func Test(t *testing.T) {
 	createTempResolvConf()
 	RegisterFailHandler(Fail)
