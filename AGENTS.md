@@ -54,11 +54,27 @@ corednsmonitor path_to_kubeconfig path_to_keepalived_cfg_template path_to_config
 - `--cloud-ingress-lb-ips`: IP Addresses of Cloud Ingress Load Balancers
 - `-p, --platform`: Cluster Platform
 
+**External DNS access blocking:**
+
+External access to CoreDNS (TCP/UDP port 53) can be blocked via nftables rules that
+allow only loopback-delivered (node-local) queries. This is driven by the
+`externalDNSAccessPolicy` field on the cluster `Infrastructure` resource
+(`status.platformStatus.baremetal.externalDNSAccessPolicy`), read live from the API
+each reconcile:
+- `Deny`: install the block rules.
+- `Allow`, omitted, or unreadable: do not block (fail-open).
+
+The rules require the container to have `CAP_NET_ADMIN`, and the container's identity
+needs `get` on `infrastructures.config.openshift.io` (both granted by the
+machine-config-operator).
+
 **Functionality:**
 - Monitors CoreDNS configuration for changes
 - Supports multiple API and Ingress VIPs
 - Handles cloud platform configurations
 - Automatically updates Corefile when interface changes are detected
+- Blocks external access to CoreDNS via nftables based on `externalDNSAccessPolicy`
+  (see External DNS access blocking)
 
 ---
 

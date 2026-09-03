@@ -17,6 +17,9 @@ import (
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -652,6 +655,51 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 	return nodes[0], nil
 }
 
+// infrastructureGVR identifies the cluster-scoped Infrastructure config resource.
+var infrastructureGVR = schema.GroupVersionResource{
+	Group:    "config.openshift.io",
+	Version:  "v1",
+	Resource: "infrastructures",
+}
+
+// externalDNSAccessDenied is the externalDNSAccessPolicy value that means
+// external DNS access is not permitted and must be blocked.
+const externalDNSAccessDenied = "Deny"
+
+// externalDNSBlockedFromInfra reports whether external CoreDNS access should be
+// blocked based on status.platformStatus.baremetal.externalDNSAccessPolicy of
+// the given Infrastructure object. Only an explicit "Deny" blocks; an omitted
+// field or any other value returns false.
+func externalDNSBlockedFromInfra(infra *unstructured.Unstructured) bool {
+	policy, found, err := unstructured.NestedString(infra.Object, "status", "platformStatus", "baremetal", "externalDNSAccessPolicy")
+	if err != nil || !found {
+		return false
+	}
+	return policy == externalDNSAccessDenied
+}
+
+// getExternalDNSBlocked fetches the cluster Infrastructure resource and reports
+// whether external CoreDNS access should be blocked. It fails open: any error
+// (client setup, API read) results in false so DNS is not accidentally blocked.
+func getExternalDNSBlocked(kubeconfigPath string) bool {
+	cfg, err := utils.GetClientConfig("", kubeconfigPath)
+	if err != nil {
+		log.WithError(err).Error("Failed to build client config to read externalDNSAccessPolicy; not blocking external DNS")
+		return false
+	}
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		log.WithError(err).Error("Failed to create dynamic client to read externalDNSAccessPolicy; not blocking external DNS")
+		return false
+	}
+	infra, err := dc.Resource(infrastructureGVR).Get(context.TODO(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		log.WithError(err).Error("Failed to get Infrastructure resource to read externalDNSAccessPolicy; not blocking external DNS")
+		return false
+	}
+	return externalDNSBlockedFromInfra(infra)
+}
+
 func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, platformType string, controlPlaneTopology string) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
@@ -714,13 +762,10 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 		node.EnableUnicast = true
 	}
 
-	// Placeholder for the future OpenShift API field that controls whether
-	// external access to CoreDNS is blocked. When that field lands, only this
-	// population source changes; consumers keep reading node.BlockExternalDNS.
-	node.BlockExternalDNS = false
-	if os.Getenv("COREDNS_BLOCK_EXTERNAL_ACCESS") == "yes" {
-		node.BlockExternalDNS = true
-	}
+	// Whether external access to CoreDNS is blocked is driven by the
+	// externalDNSAccessPolicy field on the cluster Infrastructure resource's
+	// platformStatus.baremetal. Consumers read node.BlockExternalDNS.
+	node.BlockExternalDNS = getExternalDNSBlocked(kubeconfigPath)
 
 	resolvConfUpstreams, err := getDNSUpstreams(resolvConfPath)
 	if err != nil {
