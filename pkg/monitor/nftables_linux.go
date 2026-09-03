@@ -19,6 +19,15 @@ const (
 	chainPrerouting = "ocp_prerouting"
 	chainOutput     = "ocp_output"
 	ruleComment     = "OCP_API_LB_REDIRECT"
+
+	// CoreDNS "block external access" firewall. A single inet-family table
+	// handles IPv4, IPv6 and dual-stack uniformly: the drop rule carries no IP
+	// address and matches only on iifname, l4proto and the transport dport, all
+	// of which are L3-agnostic.
+	dnsFilterTableName     = "ocp_dns_filter"
+	dnsInputChainName      = "ocp_dns_input"
+	corednsBlockCommentTCP = "OCP_COREDNS_BLOCK_EXTERNAL_TCP"
+	corednsBlockCommentUDP = "OCP_COREDNS_BLOCK_EXTERNAL_UDP"
 )
 
 // getFamily returns (v4, v6 or 0 [invalid ip - error])
@@ -33,22 +42,26 @@ func getFamily(ipStr string) (nftables.TableFamily, error) {
 	return nftables.TableFamilyIPv6, nil
 }
 
-func getOrCreateTable(conn *nftables.Conn, family nftables.TableFamily) (*nftables.Table, error) {
+func getOrCreateTableOfFamily(conn *nftables.Conn, family nftables.TableFamily, name string) (*nftables.Table, error) {
 	tables, err := conn.ListTablesOfFamily(family)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tables: %v", err)
 	}
 	for _, table := range tables {
-		if table.Name == tableName {
+		if table.Name == name {
 			return table, nil
 		}
 	}
 	table := &nftables.Table{
 		Family: family,
-		Name:   tableName,
+		Name:   name,
 	}
 	table = conn.AddTable(table)
 	return table, nil
+}
+
+func getOrCreateTable(conn *nftables.Conn, family nftables.TableFamily) (*nftables.Table, error) {
+	return getOrCreateTableOfFamily(conn, family, tableName)
 }
 
 func getOrCreateChain(conn *nftables.Conn, table *nftables.Table, name string, hook *nftables.ChainHook) (*nftables.Chain, error) {
@@ -110,17 +123,7 @@ func exprMatchDestIP(apiVip string, family nftables.TableFamily) ([]expr.Any, er
 }
 
 func exprMatchTCP() []expr.Any {
-	return []expr.Any{
-		&expr.Meta{
-			Key:      expr.MetaKeyL4PROTO,
-			Register: 1,
-		},
-		&expr.Cmp{
-			Op:       expr.CmpOpEq,
-			Register: 1,
-			Data:     []byte{unix.IPPROTO_TCP},
-		},
-	}
+	return exprMatchL4Proto(unix.IPPROTO_TCP)
 }
 
 func exprMatchDestPort(port uint16) []expr.Any {
@@ -465,4 +468,214 @@ func checkHAProxyFirewallRules(apiVip string, apiPort, lbPort uint16) (bool, err
 	}
 
 	return (preroutingRule != nil && outputRule != nil), nil
+}
+
+// getOrCreateFilterInputChain returns (creating if necessary) a base filter
+// chain hooked at input with the default-accept policy, used to host the CoreDNS
+// block rules.
+func getOrCreateFilterInputChain(conn *nftables.Conn, table *nftables.Table) (*nftables.Chain, error) {
+	chains, err := conn.ListChainsOfTableFamily(table.Family)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chains: %v", err)
+	}
+	for _, chain := range chains {
+		if chain.Table.Name == table.Name && chain.Name == dnsInputChainName {
+			return chain, nil
+		}
+	}
+	policy := nftables.ChainPolicyAccept
+	chain := &nftables.Chain{
+		Name:     dnsInputChainName,
+		Table:    table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookInput,
+		Priority: nftables.ChainPriorityFilter,
+		Policy:   &policy,
+	}
+	chain = conn.AddChain(chain)
+	return chain, nil
+}
+
+func exprMatchIIFNotLoopback() []expr.Any {
+	return []expr.Any{
+		&expr.Meta{
+			Key:      expr.MetaKeyIIFNAME,
+			Register: 1,
+		},
+		&expr.Cmp{
+			Op:       expr.CmpOpNeq,
+			Register: 1,
+			Data:     []byte("lo\x00"), // null-terminated interface name
+		},
+	}
+}
+
+func exprMatchL4Proto(proto byte) []expr.Any {
+	return []expr.Any{
+		&expr.Meta{
+			Key:      expr.MetaKeyL4PROTO,
+			Register: 1,
+		},
+		&expr.Cmp{
+			Op:       expr.CmpOpEq,
+			Register: 1,
+			Data:     []byte{proto},
+		},
+	}
+}
+
+func exprDrop() []expr.Any {
+	return []expr.Any{
+		&expr.Verdict{
+			Kind: expr.VerdictDrop,
+		},
+	}
+}
+
+// buildCorednsDropRule builds a rule that drops traffic to the CoreDNS port for
+// the given L4 protocol unless it arrives on the loopback interface. Locally
+// originated queries (including those a node sends to its own IPs) are delivered
+// via "lo" and thus fall through to the chain's accept policy.
+func buildCorednsDropRule(table *nftables.Table, chain *nftables.Chain, proto byte, port uint16, comment string) *nftables.Rule {
+	var exprs []expr.Any
+
+	exprs = append(exprs, exprMatchIIFNotLoopback()...)
+	exprs = append(exprs, exprMatchL4Proto(proto)...)
+	exprs = append(exprs, exprMatchDestPort(port)...)
+	exprs = append(exprs, exprDrop()...)
+
+	rule := &nftables.Rule{
+		Table: table,
+		Chain: chain,
+		Exprs: exprs,
+	}
+	rule.UserData = userdata.AppendString(nil, userdata.TypeComment, comment)
+
+	return rule
+}
+
+// ensureCorednsFirewallRules installs nftables rules that block external access
+// to the CoreDNS port (TCP and UDP), allowing only loopback-delivered traffic.
+// It is idempotent.
+func ensureCorednsFirewallRules(port uint16) error {
+	conn, err := nftables.New()
+	if err != nil {
+		return fmt.Errorf("failed to create nftables connection: %v", err)
+	}
+	defer conn.CloseLasting()
+
+	table, err := getOrCreateTableOfFamily(conn, nftables.TableFamilyINet, dnsFilterTableName)
+	if err != nil {
+		return err
+	}
+
+	chain, err := getOrCreateFilterInputChain(conn, table)
+	if err != nil {
+		return err
+	}
+
+	protos := []struct {
+		proto   byte
+		comment string
+	}{
+		{unix.IPPROTO_TCP, corednsBlockCommentTCP},
+		{unix.IPPROTO_UDP, corednsBlockCommentUDP},
+	}
+
+	for _, p := range protos {
+		existingRule, err := findRuleByComment(conn, chain, p.comment)
+		if err != nil {
+			return err
+		}
+		if existingRule == nil {
+			conn.InsertRule(buildCorednsDropRule(table, chain, p.proto, port, p.comment))
+			log.WithFields(logrus.Fields{
+				"chain":   dnsInputChainName,
+				"table":   table.Name,
+				"comment": p.comment,
+				"port":    port,
+			}).Info("Inserting nftables CoreDNS block rule")
+		}
+	}
+
+	if err := conn.Flush(); err != nil {
+		return fmt.Errorf("failed to flush nftables changes: %v", err)
+	}
+
+	return nil
+}
+
+// cleanCorednsFirewallRules removes the CoreDNS block rules if present. It is
+// idempotent and safe to call when the rules do not exist.
+func cleanCorednsFirewallRules(port uint16) error {
+	conn, err := nftables.New()
+	if err != nil {
+		return fmt.Errorf("failed to create nftables connection: %v", err)
+	}
+	defer conn.CloseLasting()
+
+	table, err := getOrCreateTableOfFamily(conn, nftables.TableFamilyINet, dnsFilterTableName)
+	if err != nil {
+		return err
+	}
+
+	chain, err := getOrCreateFilterInputChain(conn, table)
+	if err != nil {
+		return err
+	}
+
+	for _, comment := range []string{corednsBlockCommentTCP, corednsBlockCommentUDP} {
+		rule, err := findRuleByComment(conn, chain, comment)
+		if err != nil {
+			return err
+		}
+		if rule != nil {
+			log.WithFields(logrus.Fields{
+				"chain":   dnsInputChainName,
+				"table":   table.Name,
+				"comment": comment,
+			}).Info("Removing nftables CoreDNS block rule")
+			if err := conn.DelRule(rule); err != nil {
+				return fmt.Errorf("failed to delete CoreDNS block rule %s: %v", comment, err)
+			}
+		}
+	}
+
+	if err := conn.Flush(); err != nil {
+		return fmt.Errorf("failed to flush nftables changes: %v", err)
+	}
+
+	return nil
+}
+
+// checkCorednsFirewallRules reports whether both CoreDNS block rules (TCP and
+// UDP) exist.
+func checkCorednsFirewallRules(port uint16) (bool, error) {
+	conn, err := nftables.New()
+	if err != nil {
+		return false, fmt.Errorf("failed to create nftables connection: %v", err)
+	}
+	defer conn.CloseLasting()
+
+	table, err := getOrCreateTableOfFamily(conn, nftables.TableFamilyINet, dnsFilterTableName)
+	if err != nil {
+		return false, err
+	}
+
+	chain, err := getOrCreateFilterInputChain(conn, table)
+	if err != nil {
+		return false, err
+	}
+
+	tcpRule, err := findRuleByComment(conn, chain, corednsBlockCommentTCP)
+	if err != nil {
+		return false, err
+	}
+
+	udpRule, err := findRuleByComment(conn, chain, corednsBlockCommentUDP)
+	if err != nil {
+		return false, err
+	}
+
+	return (tcpRule != nil && udpRule != nil), nil
 }
