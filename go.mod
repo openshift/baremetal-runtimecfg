@@ -17,7 +17,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
 	github.com/vishvananda/netlink v1.1.0
-	golang.org/x/sys v0.30.0
+	golang.org/x/sys v0.35.0
 	gopkg.in/fsnotify.v1 v1.4.7
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.15
@@ -67,10 +67,10 @@ require (
 	github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/net v0.36.0 // indirect
+	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/term v0.29.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
@@ -93,3 +93,5 @@ replace (
 	k8s.io/apimachinery => k8s.io/apimachinery v0.29.1
 	k8s.io/client-go => k8s.io/client-go v0.29.1
 )
+
+replace golang.org/x/net => github.com/openshift-sustaining/net v0.43.0-sec.3
