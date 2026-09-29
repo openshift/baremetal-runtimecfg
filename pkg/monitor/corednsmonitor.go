@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -17,6 +18,47 @@ import (
 )
 
 const resolvConfFilepath string = "/var/run/NetworkManager/resolv.conf"
+
+// CorednsWatchWithNodeIPDiscovery refreshes a local CoreDNS Corefile without
+// contacting the Kubernetes API. Each attempt rebuilds every local input so a
+// transient bad resolver or node-IP file leaves the last working Corefile in
+// place and is retried on the next interval.
+func CorednsWatchWithNodeIPDiscovery(ctx context.Context, kubeconfigPath, clusterConfigPath, templatePath, cfgPath, resolvConfPath string, interval time.Duration) error {
+	return corednsWatchWithNodeIPDiscovery(ctx, kubeconfigPath, clusterConfigPath, templatePath, cfgPath, resolvConfPath, interval, config.GetConfigWithNodeIP)
+}
+
+func corednsWatchWithNodeIPDiscovery(ctx context.Context, kubeconfigPath, clusterConfigPath, templatePath, cfgPath, resolvConfPath string, interval time.Duration, getConfig func(context.Context, string, string, string) (config.Node, error)) error {
+	if interval <= 0 {
+		return fmt.Errorf("check interval must be positive")
+	}
+
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	for ctx.Err() == nil {
+		attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		newConfig, err := getConfig(attemptCtx, kubeconfigPath, clusterConfigPath, resolvConfPath)
+		cancel()
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			log.WithError(err).Error("Failed to build local CoreDNS configuration")
+		} else if err := render.RenderFile(cfgPath, templatePath, newConfig); err != nil {
+			log.WithError(err).Error("Failed to publish local CoreDNS Corefile")
+		} else {
+			log.Debug("Checked local CoreDNS Corefile")
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+	return nil
+}
 
 func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, interval time.Duration, apiLBIPs, apiIntLBIPs, ingressLBIPs []net.IP, platformType string) error {
 	signals := make(chan os.Signal, 1)
