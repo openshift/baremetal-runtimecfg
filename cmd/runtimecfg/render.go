@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
+	"time"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/config"
 	"github.com/openshift/baremetal-runtimecfg/pkg/render"
@@ -31,11 +33,12 @@ func init() {
 	renderCmd.Flags().Uint16("api-port", 6443, "Port where the OpenShift API listens at")
 	renderCmd.Flags().Uint16("lb-port", 9445, "Port where the API HAProxy LB will listen at")
 	renderCmd.Flags().Uint16("stat-port", 29445, "Port where the HAProxy stats API will listen at")
-	renderCmd.Flags().StringP("resolvconf-path", "r", "/etc/resolv.conf", "Optional path to a resolv.conf file to use to get upstream DNS servers")
+	renderCmd.Flags().StringP("resolvconf-path", "r", "/etc/resolv.conf", "Optional path to a resolv.conf file to use to get upstream DNS servers; discovery mode selects NetworkManager resolvers automatically when omitted")
 	renderCmd.Flags().IPSlice("cloud-ext-lb-ips", nil, "IP Addresses of Cloud External Load Balancers for OpenShift API")
 	renderCmd.Flags().IPSlice("cloud-int-lb-ips", nil, "IP Addresses of Cloud Internal Load Balancers for OpenShift Internal API")
 	renderCmd.Flags().IPSlice("cloud-ingress-lb-ips", nil, "IP Addresses of Cloud Ingress Load Balancers")
 	renderCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
+	renderCmd.Flags().Bool("discover-node-ip", false, "Use the primary node IP instead of VIPs")
 	renderCmd.Flags().String("peer-file", "", "Path to frr-peers.json for FRR config rendering. When set, templates receive FRR-specific data (Hostname, RouterID, LocalASN, Peers, Communities) instead of the standard Node struct.")
 	rootCmd.AddCommand(renderCmd)
 }
@@ -109,9 +112,25 @@ func runRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		platformType = ""
 	}
+	discoverNodeIP, err := cmd.Flags().GetBool("discover-node-ip")
+	if err != nil {
+		return err
+	}
 
 	clusterLBConfig := config.ClusterLBConfig{ApiLBIPs: apiLBIPs, ApiIntLBIPs: apiIntLBIPs, IngressLBIPs: ingressLBIPs}
-	cfg, err := config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType, "")
+	var cfg config.Node
+	if discoverNodeIP {
+		// If it wasn't explicitly provided, override the default in order to select either no-stub-resolv.conf or resolv.conf
+		if !cmd.Flags().Changed("resolvconf-path") {
+			resolveConfPath = ""
+		}
+
+		ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+		defer cancel()
+		cfg, err = config.GetConfigWithNodeIP(ctx, kubeCfgPath, clusterConfigPath, resolveConfPath)
+	} else {
+		cfg, err = config.GetConfig(kubeCfgPath, clusterConfigPath, resolveConfPath, apiVips, ingressVips, apiPort, lbPort, statPort, clusterLBConfig, platformType, "")
+	}
 	if err != nil {
 		return err
 	}
