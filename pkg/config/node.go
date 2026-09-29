@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ghodss/yaml"
@@ -39,6 +41,11 @@ type NodeAddress struct {
 	Address string
 	Name    string
 	Ipv6    bool
+}
+
+type localAddresses struct {
+	addresses      []netip.Addr
+	interfaceNames map[int]string
 }
 
 type Cluster struct {
@@ -998,11 +1005,17 @@ func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPa
 	nodeAddrs, err := utils.AddressesDefault(false, utils.ValidNodeAddress)
 	if err != nil {
 		// Don't fail rendering over an inability to enumerate local addresses;
-		// fall back to filtering loopback only.
-		log.Warningf("Failed to determine node addresses, DNS upstreams will only be filtered for loopback: %s", err)
+		// continue without excluding node addresses.
+		log.Warningf("Failed to determine node addresses, DNS upstreams will be filtered without node addresses: %s", err)
 		nodeAddrs = nil
 	}
-	node.DNSUpstreams = filterDNSUpstreams(resolvConfUpstreams, nodeAddrs)
+	local := localAddresses{}
+	for _, ip := range nodeAddrs {
+		if address, ok := netip.AddrFromSlice(ip); ok {
+			local.addresses = append(local.addresses, address)
+		}
+	}
+	node.DNSUpstreams = filterDNSUpstreams(resolvConfUpstreams, local)
 	// Having no DNS Upstream servers is invalid. Return error so init
 	// container can retry.
 	if len(node.DNSUpstreams) < 1 {
@@ -1011,36 +1024,53 @@ func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPa
 	return node, nil
 }
 
-// filterDNSUpstreams returns the resolv.conf nameservers that are valid CoreDNS
-// forward upstreams, dropping unparseable entries, loopback addresses, and any
-// of the node's own addresses. A hostNetwork CoreDNS listening on the node IP
-// would loop if it forwarded queries back to that same address, so those
-// entries are removed.
-func filterDNSUpstreams(resolvConfUpstreams []string, nodeAddrs []net.IP) []string {
-	upstreams := make([]string, 0)
-	for _, upstream := range resolvConfUpstreams {
-		upstreamIP := net.ParseIP(upstream)
-		if upstreamIP == nil {
-			continue
-		}
-		if upstreamIP.IsLoopback() {
-			continue
-		}
-		isNodeAddr := false
-		for _, addr := range nodeAddrs {
-			if addr.Equal(upstreamIP) {
-				isNodeAddr = true
-				break
-			}
-		}
-		if isNodeAddr {
-			log.Infof("Skipping node-local address %s as DNS upstream", upstream)
-			continue
-		}
-		log.Infof("Adding %s as DNS Upstream", upstream)
-		upstreams = append(upstreams, upstream)
+// filterDNSUpstreams returns distinct, normalized resolv.conf nameservers,
+// excluding invalid, loopback, unspecified, and node-local addresses. IPv6
+// link-local addresses retain their interface scope.
+func filterDNSUpstreams(upstreams []string, local localAddresses) []string {
+	excluded := make(map[netip.Addr]struct{}, len(local.addresses))
+	for _, address := range local.addresses {
+		excluded[normalizeAddress(address, local.interfaceNames)] = struct{}{}
 	}
-	return upstreams
+
+	filtered := make([]string, 0, len(upstreams))
+	seen := make(map[netip.Addr]struct{})
+	for _, upstream := range upstreams {
+		address, err := netip.ParseAddr(upstream)
+		if err != nil {
+			continue
+		}
+		address = normalizeAddress(address, local.interfaceNames)
+		if address.IsLoopback() || address.IsUnspecified() {
+			continue
+		}
+		if _, found := excluded[address]; found {
+			continue
+		}
+		// An unscoped local address excludes that address on every interface.
+		if _, found := excluded[address.WithZone("")]; found {
+			continue
+		}
+		if _, found := seen[address]; found {
+			continue
+		}
+		seen[address] = struct{}{}
+		filtered = append(filtered, address.String())
+	}
+	return filtered
+}
+
+func normalizeAddress(address netip.Addr, interfaceNames map[int]string) netip.Addr {
+	address = address.Unmap()
+	if !address.IsLinkLocalUnicast() {
+		return address.WithZone("")
+	}
+	if index, err := strconv.Atoi(address.Zone()); err == nil {
+		if name, found := interfaceNames[index]; found {
+			address = address.WithZone(name)
+		}
+	}
+	return address
 }
 
 func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (updatedNode Node, err error) {
