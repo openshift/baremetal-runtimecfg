@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -98,6 +99,41 @@ func writeDNSFixture(t *testing.T, path, contents string) {
 	}
 }
 
+func TestFilterDNSUpstreams(t *testing.T) {
+	addresses := localAddresses{addresses: []netip.Addr{
+		netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10"),
+	}}
+	got := filterDNSUpstreams([]string{
+		"127.0.0.1", "127.0.0.53", "::1", "0.0.0.0", "::", "192.0.2.10", "2001:db8::10", "invalid", "192.0.2.53", "192.0.2.53", "2001:0db8::53",
+	}, addresses)
+	want := []string{"192.0.2.53", "2001:db8::53"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("upstreams: got %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterDNSUpstreamsScopes(t *testing.T) {
+	local := localAddresses{
+		addresses: []netip.Addr{
+			netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("192.0.2.11"),
+			netip.MustParseAddr("2001:db8::10"), netip.MustParseAddr("fe80::10%ens3"),
+			netip.MustParseAddr("fe80::20"),
+		},
+		interfaceNames: map[int]string{3: "ens3", 4: "ens4"},
+	}
+	got := filterDNSUpstreams([]string{
+		"127.0.0.53", "::ffff:127.0.0.1", "::1%ens3", "0.0.0.0", "::%ens3", "invalid",
+		"192.0.2.10", "::ffff:192.0.2.11", "2001:0db8::10%ens3",
+		"fe80::10%3", "fe80::10%ens3", "fe80::20%ens4",
+		"fe80::10%4", "fe80::53%ens3", "fe80::53%3", "fe80::53%ens4",
+		"2001:db8::53%ens3", "2001:0db8::53", "::ffff:192.0.2.53", "192.0.2.53",
+	}, local)
+	want := []string{"fe80::10%ens4", "fe80::53%ens3", "fe80::53%ens4", "2001:db8::53", "192.0.2.53"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("upstreams: got %v, want %v", got, want)
+	}
+}
+
 func TestDNSUpstreamLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "resolv.conf")
 	input := "nameserver\n"
@@ -117,6 +153,27 @@ func TestDNSUpstreamLimit(t *testing.T) {
 	cloud, err := updateNodewithCloudInfo(nil, net.ParseIP("192.0.2.100"), nil, path, Node{})
 	if err != nil || !reflect.DeepEqual(cloud.DNSUpstreams, want) {
 		t.Fatalf("cloud upstreams: %v, error: %v", cloud.DNSUpstreams, err)
+	}
+}
+
+func TestCloudDNSUpstreamsUseStrictFiltering(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resolv.conf")
+	writeDNSFixture(t, path, `nameserver 0.0.0.0
+nameserver ::
+nameserver 127.0.0.53
+nameserver ::1
+nameserver 192.0.2.53
+nameserver ::ffff:192.0.2.53
+nameserver 2001:0db8::53
+nameserver 2001:db8::53
+nameserver fe80::53%ens3
+nameserver fe80::53%ens4
+nameserver invalid
+`)
+	cloud, err := updateNodewithCloudInfo(nil, net.ParseIP("192.0.2.100"), nil, path, Node{})
+	want := []string{"192.0.2.53", "2001:db8::53", "fe80::53%ens3", "fe80::53%ens4"}
+	if err != nil || !reflect.DeepEqual(cloud.DNSUpstreams, want) {
+		t.Fatalf("cloud upstreams: got %v, want %v, error: %v", cloud.DNSUpstreams, want, err)
 	}
 }
 
@@ -537,7 +594,7 @@ var _ = Describe("isOnPremPlatform", func() {
 })
 
 var _ = Describe("filterDNSUpstreams", func() {
-	nodeAddrs := []net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("fd00::5")}
+	nodeAddrs := localAddresses{addresses: []netip.Addr{netip.MustParseAddr("10.0.0.5"), netip.MustParseAddr("fd00::5")}}
 
 	It("keeps real upstreams unchanged", func() {
 		upstreams := filterDNSUpstreams([]string{"169.254.169.254", "8.8.8.8"}, nodeAddrs)
@@ -570,8 +627,8 @@ var _ = Describe("filterDNSUpstreams", func() {
 		Expect(upstreams).To(BeEmpty())
 	})
 
-	It("filters loopback only when node addresses are unavailable", func() {
-		upstreams := filterDNSUpstreams([]string{"10.0.0.5", "127.0.0.1", "8.8.8.8"}, nil)
+	It("filters upstreams when node addresses are unavailable", func() {
+		upstreams := filterDNSUpstreams([]string{"10.0.0.5", "127.0.0.1", "0.0.0.0", "::", "8.8.8.8", "8.8.8.8"}, localAddresses{})
 		Expect(upstreams).To(Equal([]string{"10.0.0.5", "8.8.8.8"}))
 	})
 })
