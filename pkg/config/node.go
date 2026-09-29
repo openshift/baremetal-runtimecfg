@@ -26,6 +26,7 @@ import (
 
 const (
 	localhostKubeApiServerUrl string = "https://localhost:6443"
+	maxDNSUpstreams                  = 15
 	// labelNodeRolePrefix is a label prefix for node roles
 	labelNodeRolePrefix = "node-role.kubernetes.io/"
 	// highlyAvailableArbiterMode is the control plane topology when installing TNA
@@ -154,9 +155,9 @@ func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
 		switch fields[0] {
 		case "nameserver":
 			// CoreDNS forward plugin takes up to 15 upstream servers
-			if len(fields) > 1 && len(upstreams) < 15 {
+			if len(fields) > 1 && len(upstreams) < maxDNSUpstreams {
+				upstreams = append(upstreams, fields[1])
 			}
-			upstreams = append(upstreams, fields[1])
 		}
 	}
 	if err := scanner.Err(); err != nil {
