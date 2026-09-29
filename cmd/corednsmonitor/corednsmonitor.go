@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"time"
 
@@ -13,7 +14,7 @@ var log = logrus.New()
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "corednsmonitor path_to_kubeconfig path_to_keepalived_cfg_template path_to_config",
+		Use:   "corednsmonitor path_to_kubeconfig path_to_coredns_template path_to_config",
 		Short: "Monitors runtime external interface for Coredns Corefile changes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 3 {
@@ -72,6 +73,23 @@ func main() {
 				platformType = ""
 			}
 
+			discoverNodeIP, err := cmd.Flags().GetBool("discover-node-ip")
+			if err != nil {
+				return err
+			}
+			resolvConfPath, err := cmd.Flags().GetString("resolvconf-path")
+			if err != nil {
+				return err
+			}
+			if discoverNodeIP {
+				if len(apiVips) != 0 || len(ingressVips) != 0 || len(cloudExtLBIPs) != 0 || len(cloudIntLBIPs) != 0 || len(cloudIngressLBIPs) != 0 || platformType != "" {
+					return fmt.Errorf("VIP and cloud options cannot be used with --discover-node-ip")
+				}
+				return monitor.CorednsWatchWithNodeIPDiscovery(cmd.Context(), args[0], clusterConfigPath, args[1], args[2], resolvConfPath, checkInterval)
+			}
+			if cmd.Flags().Changed("resolvconf-path") {
+				return fmt.Errorf("resolver source options require --discover-node-ip")
+			}
 			return monitor.CorednsWatch(args[0], clusterConfigPath, args[1], args[2], apiVips, ingressVips, checkInterval, cloudExtLBIPs, cloudIntLBIPs, cloudIngressLBIPs, platformType)
 		},
 	}
@@ -85,6 +103,8 @@ func main() {
 	rootCmd.Flags().IPSlice("cloud-int-lb-ips", nil, "IP Addresses of Cloud Internal Load Balancers for OpenShift Internal API")
 	rootCmd.Flags().IPSlice("cloud-ingress-lb-ips", nil, "IP Addresses of Cloud Ingress Load Balancers")
 	rootCmd.Flags().StringP("platform", "p", "", "Cluster Platform")
+	rootCmd.Flags().Bool("discover-node-ip", false, "Discover local node IPs without contacting the API")
+	rootCmd.Flags().StringP("resolvconf-path", "r", "", "Path to upstream DNS resolvers; selects NetworkManager resolvers automatically when omitted")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Failed due to %s", err)
