@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -99,6 +102,57 @@ func writeDNSFixture(t *testing.T, path, contents string) {
 	}
 }
 
+func TestDiscoverNodeIPs(t *testing.T) {
+	cases := []struct {
+		name    string
+		primary string
+		ipv4    string
+		ipv6    string
+		want    []DNSAddress
+		wantErr bool
+	}{
+		{name: "IPv4 only", primary: "192.0.2.10\n", ipv4: "192.0.2.10", ipv6: "<missing>", want: []DNSAddress{{Address: "192.0.2.10", RecordType: "A"}}},
+		{name: "IPv6 only", primary: "2001:db8::10", ipv4: "<missing>", ipv6: "2001:db8::10\n", want: []DNSAddress{{Address: "2001:db8::10", RecordType: "AAAA"}}},
+		{name: "dual stack IPv4 primary", primary: "192.0.2.10", ipv4: "192.0.2.10", ipv6: "2001:db8::10", want: []DNSAddress{{Address: "192.0.2.10", RecordType: "A"}, {Address: "2001:db8::10", RecordType: "AAAA"}}},
+		{name: "dual stack IPv6 primary", primary: "2001:db8::10", ipv4: "192.0.2.10", ipv6: "2001:db8::10", want: []DNSAddress{{Address: "2001:db8::10", RecordType: "AAAA"}, {Address: "192.0.2.10", RecordType: "A"}}},
+		{name: "missing primary", primary: "<missing>", ipv4: "192.0.2.10", ipv6: "<missing>", wantErr: true},
+		{name: "empty primary", primary: "", ipv4: "192.0.2.10", ipv6: "<missing>", wantErr: true},
+		{name: "invalid primary", primary: "not-an-ip", ipv4: "192.0.2.10", ipv6: "<missing>", wantErr: true},
+		{name: "missing primary family", primary: "192.0.2.10", ipv4: "<missing>", ipv6: "<missing>", wantErr: true},
+		{name: "empty primary family", primary: "2001:db8::10", ipv4: "<missing>", ipv6: "", wantErr: true},
+		{name: "invalid optional family", primary: "192.0.2.10", ipv4: "192.0.2.10", ipv6: "invalid", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			write := func(name, value string) string {
+				path := filepath.Join(dir, name)
+				if value != "<missing>" {
+					if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return path
+			}
+
+			got, err := discoverNodeIPs(write("primary-ip", tc.primary), write("ipv4", tc.ipv4), write("ipv6", tc.ipv6))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error, got addresses %#v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("addresses: got %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFilterDNSUpstreams(t *testing.T) {
 	addresses := localAddresses{addresses: []netip.Addr{
 		netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10"),
@@ -109,6 +163,62 @@ func TestFilterDNSUpstreams(t *testing.T) {
 	want := []string{"192.0.2.53", "2001:db8::53"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("upstreams: got %#v, want %#v", got, want)
+	}
+}
+
+func dnsKubeconfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	writeDNSFixture(t, path, `apiVersion: v1
+kind: Config
+current-context: test
+contexts:
+- name: test
+  context:
+    cluster: test
+clusters:
+- name: test
+  cluster:
+    server: https://api.cluster.example.invalid:6443
+`)
+	return path
+}
+
+func TestCollectInterfaceAddresses(t *testing.T) {
+	interfaces := []net.Interface{{Index: 3, Name: "ens3"}, {Index: 4, Name: "ens4"}}
+	calls := 0
+	local, err := collectInterfaceAddresses(interfaces, func(iface *net.Interface) ([]net.Addr, error) {
+		calls++
+		cidrs := []string{"192.0.2.10/24", "192.0.2.11/24", "2001:db8::10/64", "fe80::10/64"}
+		if iface.Name == "ens4" {
+			cidrs = []string{"198.51.100.10/24", "fe80::10/64"}
+		}
+		var addresses []net.Addr
+		for _, cidr := range cidrs {
+			ip, prefix, err := net.ParseCIDR(cidr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix.IP = ip
+			addresses = append(addresses, prefix)
+		}
+		return addresses, nil
+	})
+	if err != nil || calls != len(interfaces) {
+		t.Fatalf("collector calls: %d, error: %v", calls, err)
+	}
+	want := []netip.Addr{
+		netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("192.0.2.11"),
+		netip.MustParseAddr("2001:db8::10"), netip.MustParseAddr("fe80::10%ens3"),
+		netip.MustParseAddr("198.51.100.10"), netip.MustParseAddr("fe80::10%ens4"),
+	}
+	if !reflect.DeepEqual(local.addresses, want) || !reflect.DeepEqual(local.interfaceNames, map[int]string{3: "ens3", 4: "ens4"}) {
+		t.Fatalf("unexpected interface snapshot: %#v", local)
+	}
+	errCollection := errors.New("interface address lookup failed")
+	_, err = collectInterfaceAddresses(interfaces, func(*net.Interface) ([]net.Addr, error) { return nil, errCollection })
+	if !errors.Is(err, errCollection) {
+		t.Fatalf("lost collection error: %v", err)
 	}
 }
 
@@ -174,6 +284,97 @@ nameserver invalid
 	want := []string{"192.0.2.53", "2001:db8::53", "fe80::53%ens3", "fe80::53%ens4"}
 	if err != nil || !reflect.DeepEqual(cloud.DNSUpstreams, want) {
 		t.Fatalf("cloud upstreams: got %v, want %v, error: %v", cloud.DNSUpstreams, want, err)
+	}
+}
+
+func TestGetFilteredDNSUpstreams(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resolv.conf")
+	local := localAddresses{addresses: []netip.Addr{netip.MustParseAddr("192.0.2.10")}}
+	for _, input := range []string{"", "nameserver\n", "nameserver 127.0.0.1\nnameserver 192.0.2.10\n"} {
+		writeDNSFixture(t, path, input)
+		if _, err := getFilteredDNSUpstreams(path, local); err == nil {
+			t.Fatalf("accepted resolver input without usable upstreams: %q", input)
+		}
+	}
+	input := "nameserver 127.0.0.1\n"
+	for i := 1; i <= maxDNSUpstreams+1; i++ {
+		input += fmt.Sprintf("nameserver 198.51.100.%d\n", i)
+	}
+	writeDNSFixture(t, path, input)
+	got, err := getFilteredDNSUpstreams(path, local)
+	if err != nil || len(got) != maxDNSUpstreams-1 || got[0] != "198.51.100.1" || got[len(got)-1] != "198.51.100.14" {
+		t.Fatalf("expected filtering of the first 15 entries: %v, %v", got, err)
+	}
+}
+
+func TestGetConfigWithNodeIPLocalInputs(t *testing.T) {
+	dir, kubeconfig := t.TempDir(), dnsKubeconfig(t)
+	paths := nodeIPPaths{filepath.Join(dir, "primary-ip"), filepath.Join(dir, "ipv4"), filepath.Join(dir, "ipv6")}
+	resolv := filepath.Join(dir, "resolv.conf")
+	writeDNSFixture(t, paths.primary, "2001:db8::10\n")
+	writeDNSFixture(t, paths.ipv4, "192.0.2.10")
+	writeDNSFixture(t, paths.ipv6, "2001:db8::10")
+	writeDNSFixture(t, resolv, "nameserver 192.0.2.10\nnameserver 192.0.2.11\nnameserver 192.0.2.53\n")
+	local := localAddresses{addresses: []netip.Addr{netip.MustParseAddr("192.0.2.11")}}
+	var collectErr error
+	calls := 0
+	collect := func() (localAddresses, error) { calls++; return local, collectErr }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cfg, err := getConfigWithNodeIP(ctx, kubeconfig, "", resolv, paths, collect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || cfg.Cluster.Name != "cluster" || cfg.Cluster.Domain != "example.invalid" || cfg.ShortHostname == "" {
+		t.Fatalf("unexpected local config: %#v, collector calls: %d", cfg, calls)
+	}
+	if cfg.NonVirtualIP != "2001:db8::10" || len(cfg.DNSAddresses) != 2 || cfg.DNSAddresses[0].RecordType != "AAAA" || !reflect.DeepEqual(cfg.DNSUpstreams, []string{"192.0.2.53"}) {
+		t.Fatalf("unexpected DNS config: %#v", cfg)
+	}
+	if cfg.Configs == nil || len(*cfg.Configs) != 1 || (*cfg.Configs)[0].NonVirtualIP != cfg.NonVirtualIP {
+		t.Fatal("missing single-node Configs shape")
+	}
+
+	writeDNSFixture(t, paths.primary, "192.0.2.12")
+	writeDNSFixture(t, paths.ipv4, "192.0.2.12")
+	if err := os.Remove(paths.ipv6); err != nil {
+		t.Fatal(err)
+	}
+	local.addresses = []netip.Addr{netip.MustParseAddr("192.0.2.53")}
+	cfg, err = getConfigWithNodeIP(ctx, kubeconfig, "", resolv, paths, collect)
+	if err != nil || cfg.NonVirtualIP != "192.0.2.12" || len(cfg.DNSAddresses) != 1 || !reflect.DeepEqual(cfg.DNSUpstreams, []string{"192.0.2.10", "192.0.2.11"}) {
+		t.Fatalf("changed inputs not reflected: %#v, %v", cfg, err)
+	}
+	collectErr = errors.New("interface enumeration failed")
+	if _, err := getConfigWithNodeIP(ctx, kubeconfig, "", resolv, paths, collect); !errors.Is(err, collectErr) {
+		t.Fatalf("lost enumeration error: %v", err)
+	}
+}
+
+func TestWaitForNodeIPsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	paths := nodeIPPaths{filepath.Join(dir, "primary-ip"), filepath.Join(dir, "ipv4"), filepath.Join(dir, "ipv6")}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := waitForNodeIPs(ctx, paths); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if time.Since(start) >= nodeIPDiscoveryRetryInterval {
+		t.Fatal("cancellation waited for discovery retry interval")
+	}
+}
+
+func TestWaitForNodeIPsAlreadyCanceled(t *testing.T) {
+	dir := t.TempDir()
+	paths := nodeIPPaths{filepath.Join(dir, "primary-ip"), filepath.Join(dir, "ipv4"), filepath.Join(dir, "ipv6")}
+	writeDNSFixture(t, paths.primary, "192.0.2.10")
+	writeDNSFixture(t, paths.ipv4, "192.0.2.10")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	addresses, err := waitForNodeIPs(ctx, paths)
+	if !errors.Is(err, context.Canceled) || len(addresses) != 0 {
+		t.Fatalf("expected cancellation despite ready inputs, got %v, %v", addresses, err)
 	}
 }
 
