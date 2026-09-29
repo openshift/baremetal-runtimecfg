@@ -93,6 +93,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 			log.WithFields(logrus.Fields{
 				"path": paths[0],
 			}).Error("Failed to stat file")
+			return err
 		}
 		if fi.Mode().IsDir() {
 			templateDir := paths[0]
@@ -126,6 +127,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 				"path": templatePath,
 				"err":  err,
 			}).Error("Failed to render template")
+			return err
 		}
 	}
 	return nil
