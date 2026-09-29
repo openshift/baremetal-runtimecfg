@@ -15,6 +15,7 @@ import (
 	"github.com/openshift/installer/pkg/types/none"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 )
 
@@ -541,6 +542,38 @@ var _ = Describe("filterDNSUpstreams", func() {
 	It("filters loopback only when node addresses are unavailable", func() {
 		upstreams := filterDNSUpstreams([]string{"10.0.0.5", "127.0.0.1", "8.8.8.8"}, nil)
 		Expect(upstreams).To(Equal([]string{"10.0.0.5", "8.8.8.8"}))
+	})
+})
+
+var _ = Describe("externalDNSBlockedFromInfra", func() {
+	infraWithPolicy := func(policy interface{}) *unstructured.Unstructured {
+		baremetal := map[string]interface{}{}
+		if policy != nil {
+			baremetal["externalDNSAccessPolicy"] = policy
+		}
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"status": map[string]interface{}{
+				"platformStatus": map[string]interface{}{
+					"baremetal": baremetal,
+				},
+			},
+		}}
+	}
+
+	It("blocks when the policy is Deny", func() {
+		Expect(externalDNSBlockedFromInfra(infraWithPolicy("Deny"))).To(BeTrue())
+	})
+	It("does not block when the policy is Allow", func() {
+		Expect(externalDNSBlockedFromInfra(infraWithPolicy("Allow"))).To(BeFalse())
+	})
+	It("does not block when the policy is omitted", func() {
+		Expect(externalDNSBlockedFromInfra(infraWithPolicy(nil))).To(BeFalse())
+	})
+	It("does not block when platformStatus.baremetal is absent", func() {
+		infra := &unstructured.Unstructured{Object: map[string]interface{}{
+			"status": map[string]interface{}{"platformStatus": map[string]interface{}{}},
+		}}
+		Expect(externalDNSBlockedFromInfra(infra)).To(BeFalse())
 	})
 })
 

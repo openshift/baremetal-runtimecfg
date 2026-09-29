@@ -18,6 +18,9 @@ import (
 
 const resolvConfFilepath string = "/var/run/NetworkManager/resolv.conf"
 
+// corednsDNSPort is the port CoreDNS serves DNS on (host network).
+const corednsDNSPort uint16 = 53
+
 func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath string, apiVips, ingressVips []net.IP, interval time.Duration, apiLBIPs, apiIntLBIPs, ingressLBIPs []net.IP, platformType string) error {
 	signals := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
@@ -50,6 +53,11 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 	for {
 		select {
 		case <-done:
+			// Remove any block rules we own so a container removal does not
+			// leave orphaned nftables state behind.
+			if err := cleanCorednsFirewallRules(corednsDNSPort); err != nil {
+				log.WithError(err).Error("Failed to clean CoreDNS firewall rules on shutdown")
+			}
 			return nil
 		default:
 			curMD5, err := utils.GetFileMd5(resolvConfFilepath)
@@ -67,6 +75,22 @@ func CorednsWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath strin
 			newConfig, err = config.PopulateCloudLBIPAddresses(clusterLBConfig, newConfig)
 			if err != nil {
 				return err
+			}
+
+			// Reconcile the nftables rules that block external access to
+			// CoreDNS. This is gated on a setting that will be driven by a
+			// future OpenShift API field (currently a placeholder env var).
+			// Failures are logged, not fatal: they must not stop Corefile
+			// rendering, and the coredns-monitor container needs NET_ADMIN
+			// (granted by machine-config-operator) before rules can be applied.
+			if newConfig.BlockExternalDNS {
+				if err := ensureCorednsFirewallRules(corednsDNSPort); err != nil {
+					log.WithError(err).Error("Failed to ensure CoreDNS firewall rules")
+				}
+			} else {
+				if err := cleanCorednsFirewallRules(corednsDNSPort); err != nil {
+					log.WithError(err).Error("Failed to clean CoreDNS firewall rules")
+				}
 			}
 
 			config.PopulateNodeAddresses(kubeconfigPath, &newConfig, nodeWatcher)
