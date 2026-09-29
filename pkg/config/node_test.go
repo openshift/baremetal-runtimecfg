@@ -1,8 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -87,6 +90,35 @@ var (
 	testIngressVipV4     = "192.168.1.102"
 	testIngressVipV6     = "fd00::102"
 )
+
+func writeDNSFixture(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDNSUpstreamLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resolv.conf")
+	input := "nameserver\n"
+	want := make([]string, 0, maxDNSUpstreams)
+	for i := 1; i <= maxDNSUpstreams+1; i++ {
+		address := fmt.Sprintf("198.51.100.%d", i)
+		input += "nameserver " + address + "\n"
+		if i <= maxDNSUpstreams {
+			want = append(want, address)
+		}
+	}
+	writeDNSFixture(t, path, input)
+	upstreams, err := getDNSUpstreams(path)
+	if err != nil || !reflect.DeepEqual(upstreams, want) {
+		t.Fatalf("parser upstreams: %v, error: %v", upstreams, err)
+	}
+	cloud, err := updateNodewithCloudInfo(nil, net.ParseIP("192.0.2.100"), nil, path, Node{})
+	if err != nil || !reflect.DeepEqual(cloud.DNSUpstreams, want) {
+		t.Fatalf("cloud upstreams: %v, error: %v", cloud.DNSUpstreams, err)
+	}
+}
 
 var _ = Describe("getNodePeersForIpStack", func() {
 	Context("for dual-stack node", func() {
