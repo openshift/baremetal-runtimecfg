@@ -22,7 +22,7 @@ func GetIpFromFile(filePath string) (net.IP, error) {
 		log.WithError(err).Infof("Failed to read ip from file %s", filePath)
 		return nil, err
 	}
-	ip := net.ParseIP(string(b))
+	ip := net.ParseIP(strings.TrimSpace(string(b)))
 	if ip == nil {
 		msg := fmt.Sprintf("Failed to parse ip from file %s", filePath)
 		log.Errorf("%s", msg)
