@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -85,6 +86,85 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	return tmpl.Execute(renderFile, cfg)
 }
 
+// RenderFileAtomic publishes a rendered template without exposing a partial file.
+// Unlike RenderFile, it refuses symlink destinations because this writer owns the
+// target Corefile rather than the symlink's target.
+func RenderFileAtomic(renderPath, templatePath string, cfg interface{}) error {
+	contents, mode, err := expand(templatePath, cfg)
+	if err != nil {
+		return err
+	}
+
+	info, err := os.Lstat(renderPath)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlink output %q", renderPath)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("output %q is not a regular file", renderPath)
+		}
+		existing, readErr := os.ReadFile(renderPath)
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Equal(existing, contents) && info.Mode().Perm() == mode.Perm() {
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	temporary, err := os.CreateTemp(filepath.Dir(renderPath), ".runtimecfg-")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer func() {
+		if err := os.Remove(temporaryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.WithField("path", temporaryPath).WithError(err).Warn("Failed to remove temporary file")
+		}
+	}()
+	if err := temporary.Chmod(mode); err != nil {
+		return errors.Join(err, temporary.Close())
+	}
+	if _, err := temporary.Write(contents); err != nil {
+		return errors.Join(err, temporary.Close())
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, renderPath)
+}
+
+func expand(templatePath string, cfg interface{}) ([]byte, os.FileMode, error) {
+	funcMap := template.FuncMap{
+		"isIPv4": func(addr string) bool {
+			ip := net.ParseIP(addr)
+			return ip != nil && ip.To4() != nil
+		},
+		"isIPv6": func(addr string) bool {
+			ip := net.ParseIP(addr)
+			return ip != nil && ip.To4() == nil
+		},
+	}
+	name := filepath.Base(templatePath)
+	tmpl, err := template.New(name).Funcs(funcMap).ParseFiles(templatePath)
+	if err != nil {
+		return nil, 0, err
+	}
+	templateStat, err := os.Stat(templatePath)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	buf := &bytes.Buffer{}
+	err = tmpl.Execute(buf, cfg)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buf.Bytes(), templateStat.Mode(), nil
+}
+
 func Render(outDir string, paths []string, cfg interface{}) error {
 	tempPaths := paths
 	if len(paths) == 1 {
@@ -93,6 +173,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 			log.WithFields(logrus.Fields{
 				"path": paths[0],
 			}).Error("Failed to stat file")
+			return err
 		}
 		if fi.Mode().IsDir() {
 			templateDir := paths[0]
@@ -126,6 +207,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 				"path": templatePath,
 				"err":  err,
 			}).Error("Failed to render template")
+			return err
 		}
 	}
 	return nil
