@@ -118,9 +118,10 @@ func TestDiscoverNodeIPs(t *testing.T) {
 		{name: "missing primary", primary: "<missing>", ipv4: "192.0.2.10", ipv6: "<missing>", wantErr: true},
 		{name: "empty primary", primary: "", ipv4: "192.0.2.10", ipv6: "<missing>", wantErr: true},
 		{name: "invalid primary", primary: "not-an-ip", ipv4: "192.0.2.10", ipv6: "<missing>", wantErr: true},
-		{name: "missing primary family", primary: "192.0.2.10", ipv4: "<missing>", ipv6: "<missing>", wantErr: true},
-		{name: "empty primary family", primary: "2001:db8::10", ipv4: "<missing>", ipv6: "", wantErr: true},
+		{name: "primary family file is not required", primary: "192.0.2.10", ipv4: "<missing>", ipv6: "<missing>", want: []DNSAddress{{Address: "192.0.2.10", RecordType: "A"}}},
+		{name: "primary family file is ignored", primary: "2001:db8::10", ipv4: "<missing>", ipv6: "", want: []DNSAddress{{Address: "2001:db8::10", RecordType: "AAAA"}}},
 		{name: "invalid optional family", primary: "192.0.2.10", ipv4: "192.0.2.10", ipv6: "invalid", wantErr: true},
+		{name: "wrong optional family", primary: "192.0.2.10", ipv4: "192.0.2.10", ipv6: "192.0.2.11", wantErr: true},
 	}
 
 	for _, tc := range cases {

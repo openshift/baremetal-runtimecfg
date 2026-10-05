@@ -160,12 +160,6 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// node ip hint for all other services
-	err = writeToFile(nodeIpFile, nodeIP)
-	if err != nil {
-		return err
-	}
-
 	ipv6Created, ipv4Created := false, false
 	for i := 0; i < len(chosenAddresses) && i < 2; i++ {
 		if utils.IsIPv6(chosenAddresses[i]) && !ipv6Created {
@@ -181,6 +175,13 @@ func set(cmd *cobra.Command, args []string) error {
 			}
 			ipv4Created = true
 		}
+	}
+
+	// Publish the primary IP last so its presence indicates that all selected
+	// family files have been written.
+	err = writeToFile(nodeIpFile, nodeIP)
+	if err != nil {
+		return err
 	}
 
 	return nil
