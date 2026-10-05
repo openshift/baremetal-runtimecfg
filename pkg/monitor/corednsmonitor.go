@@ -44,7 +44,7 @@ func corednsWatchWithNodeIPDiscovery(ctx context.Context, kubeconfigPath, cluste
 		}
 		if err != nil {
 			log.WithError(err).Error("Failed to build local CoreDNS configuration")
-		} else if err := render.RenderFileAtomic(cfgPath, templatePath, newConfig); err != nil {
+		} else if err := render.RenderFile(cfgPath, templatePath, newConfig); err != nil {
 			log.WithError(err).Error("Failed to publish local CoreDNS Corefile")
 		} else {
 			log.Debug("Checked local CoreDNS Corefile")

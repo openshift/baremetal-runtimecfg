@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"text/template"
 
 	"github.com/sirupsen/logrus"
@@ -20,51 +19,10 @@ var extLen = len(ext)
 
 var log = logrus.New()
 
+// RenderFile publishes a rendered template without exposing a partial file.
+// It refuses symlink destinations because the renderer owns the destination
+// rather than the symlink's target.
 func RenderFile(renderPath, templatePath string, cfg interface{}) error {
-	contents, mode, err := renderTemplate(templatePath, cfg)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": templatePath,
-		}).Error("Failed to render template")
-		return err
-	}
-
-	renderFile, err := os.Create(renderPath)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": renderPath,
-		}).Error("Failed to create file")
-		return err
-	}
-	defer renderFile.Close()
-
-	// Make sure we propagate any special permissions
-	err = os.Chmod(renderPath, mode)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": renderPath,
-		}).Error("Failed to set permissions on file")
-		return err
-	}
-
-	// The string we get back is a single line with \n's. For readability,
-	// split it and write it line-by-line.
-	lines := strings.Split(string(contents), "\n")
-	for _, line := range lines {
-		log.Info(line)
-	}
-
-	log.WithFields(logrus.Fields{
-		"path": renderPath,
-	}).Info("Runtimecfg rendering template")
-	_, err = renderFile.Write(contents)
-	return err
-}
-
-// RenderFileAtomic publishes a rendered template without exposing a partial file.
-// Unlike RenderFile, it refuses symlink destinations because this writer owns the
-// target Corefile rather than the symlink's target.
-func RenderFileAtomic(renderPath, templatePath string, cfg interface{}) error {
 	contents, mode, err := renderTemplate(templatePath, cfg)
 	if err != nil {
 		return err

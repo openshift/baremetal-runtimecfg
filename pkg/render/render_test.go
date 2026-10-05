@@ -49,21 +49,21 @@ template IN {{.RecordType}} cluster.example {
 	}
 }
 
-func TestRenderFileAtomicPreservesUnchangedOutputAndRejectsSymlink(t *testing.T) {
+func TestRenderFilePreservesUnchangedOutputAndRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	templatePath := filepath.Join(dir, "Corefile.tmpl")
 	outputPath := filepath.Join(dir, "Corefile")
 	if err := os.WriteFile(templatePath, []byte("{{.}}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderFileAtomic(outputPath, templatePath, "first"); err != nil {
+	if err := RenderFile(outputPath, templatePath, "first"); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.Stat(outputPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderFileAtomic(outputPath, templatePath, "first"); err != nil {
+	if err := RenderFile(outputPath, templatePath, "first"); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.Stat(outputPath)
@@ -77,7 +77,7 @@ func TestRenderFileAtomicPreservesUnchangedOutputAndRejectsSymlink(t *testing.T)
 	if err := os.Symlink(outputPath, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderFileAtomic(link, templatePath, "second"); err == nil {
+	if err := RenderFile(link, templatePath, "second"); err == nil {
 		t.Fatal("atomic renderer accepted a symlink destination")
 	}
 }
@@ -112,7 +112,7 @@ func TestRenderDirectory(t *testing.T) {
 	}
 }
 
-func TestRenderFileAtomicErrorsPreserveOutput(t *testing.T) {
+func TestRenderFileErrorsPreserveOutput(t *testing.T) {
 	for _, failure := range []string{"missing template", "parse error", "execution error", "missing output directory"} {
 		t.Run(failure, func(t *testing.T) {
 			dir, out := t.TempDir(), t.TempDir()
@@ -139,7 +139,7 @@ func TestRenderFileAtomicErrorsPreserveOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := RenderFileAtomic(filepath.Join(out, "Corefile"), templatePath, "new"); err == nil {
+			if err := RenderFile(filepath.Join(out, "Corefile"), templatePath, "new"); err == nil {
 				t.Fatal("expected render error")
 			}
 			content, err := os.ReadFile(outputPath)
@@ -154,13 +154,13 @@ func TestRenderFileAtomicErrorsPreserveOutput(t *testing.T) {
 	}
 }
 
-func TestRenderFileAtomicReplacesChangedOutput(t *testing.T) {
+func TestRenderFileReplacesChangedOutput(t *testing.T) {
 	dir := t.TempDir()
 	templatePath, outputPath := filepath.Join(dir, "Corefile.tmpl"), filepath.Join(dir, "Corefile")
 	if err := os.WriteFile(templatePath, []byte("{{.}}"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderFileAtomic(outputPath, templatePath, "first"); err != nil {
+	if err := RenderFile(outputPath, templatePath, "first"); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.Stat(outputPath)
@@ -171,7 +171,7 @@ func TestRenderFileAtomicReplacesChangedOutput(t *testing.T) {
 		if err := os.Chmod(templatePath, mode); err != nil {
 			t.Fatal(err)
 		}
-		if err := RenderFileAtomic(outputPath, templatePath, "second"); err != nil {
+		if err := RenderFile(outputPath, templatePath, "second"); err != nil {
 			t.Fatal(err)
 		}
 		after, err := os.Stat(outputPath)
