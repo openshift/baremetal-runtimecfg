@@ -21,22 +21,11 @@ var extLen = len(ext)
 var log = logrus.New()
 
 func RenderFile(renderPath, templatePath string, cfg interface{}) error {
-	funcMap := template.FuncMap{
-		"isIPv4": func(addr string) bool {
-			ip := net.ParseIP(addr)
-			return ip != nil && ip.To4() != nil
-		},
-		"isIPv6": func(addr string) bool {
-			ip := net.ParseIP(addr)
-			return ip != nil && ip.To4() == nil
-		},
-	}
-	name := filepath.Base(templatePath)
-	tmpl, err := template.New(name).Funcs(funcMap).ParseFiles(templatePath)
+	contents, mode, err := renderTemplate(templatePath, cfg)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"path": templatePath,
-		}).Error("Failed to parse template")
+		}).Error("Failed to render template")
 		return err
 	}
 
@@ -50,14 +39,7 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	defer renderFile.Close()
 
 	// Make sure we propagate any special permissions
-	templateStat, err := os.Stat(templatePath)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": templatePath,
-		}).Error("Failed to stat template")
-		return err
-	}
-	err = os.Chmod(renderPath, templateStat.Mode())
+	err = os.Chmod(renderPath, mode)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"path": renderPath,
@@ -65,17 +47,9 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 		return err
 	}
 
-	buf := &bytes.Buffer{}
-	err = tmpl.Execute(buf, cfg)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": renderPath,
-		}).Error("Failed to render template")
-		return err
-	}
 	// The string we get back is a single line with \n's. For readability,
 	// split it and write it line-by-line.
-	lines := strings.Split(buf.String(), "\n")
+	lines := strings.Split(string(contents), "\n")
 	for _, line := range lines {
 		log.Info(line)
 	}
@@ -83,14 +57,15 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	log.WithFields(logrus.Fields{
 		"path": renderPath,
 	}).Info("Runtimecfg rendering template")
-	return tmpl.Execute(renderFile, cfg)
+	_, err = renderFile.Write(contents)
+	return err
 }
 
 // RenderFileAtomic publishes a rendered template without exposing a partial file.
 // Unlike RenderFile, it refuses symlink destinations because this writer owns the
 // target Corefile rather than the symlink's target.
 func RenderFileAtomic(renderPath, templatePath string, cfg interface{}) error {
-	contents, mode, err := expand(templatePath, cfg)
+	contents, mode, err := renderTemplate(templatePath, cfg)
 	if err != nil {
 		return err
 	}
@@ -136,7 +111,7 @@ func RenderFileAtomic(renderPath, templatePath string, cfg interface{}) error {
 	return os.Rename(temporaryPath, renderPath)
 }
 
-func expand(templatePath string, cfg interface{}) ([]byte, os.FileMode, error) {
+func renderTemplate(templatePath string, cfg interface{}) ([]byte, os.FileMode, error) {
 	funcMap := template.FuncMap{
 		"isIPv4": func(addr string) bool {
 			ip := net.ParseIP(addr)
