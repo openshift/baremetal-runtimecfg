@@ -775,34 +775,31 @@ func discoverNodeIPs(primaryPath, ipv4Path, ipv6Path string) ([]DNSAddress, erro
 		return nil, fmt.Errorf("read primary node IP: %w", err)
 	}
 
-	type familyFile struct {
-		path       string
-		recordType string
-		ipv6       bool
-		required   bool
-	}
-	families := []familyFile{
-		{path: ipv4Path, recordType: ipv4DNSRecordType, required: primaryIP.To4() != nil},
-		{path: ipv6Path, recordType: ipv6DNSRecordType, ipv6: true, required: primaryIP.To4() == nil},
-	}
-	if primaryIP.To4() == nil {
-		families[0], families[1] = families[1], families[0]
+	dnsAddress := func(address net.IP) DNSAddress {
+		recordType := ipv6DNSRecordType
+		if address.To4() != nil {
+			recordType = ipv4DNSRecordType
+		}
+		return DNSAddress{Address: address.String(), RecordType: recordType}
 	}
 
-	addresses := make([]DNSAddress, 0, len(families))
-	for _, family := range families {
-		address, err := GetIpFromFile(family.path)
-		if err != nil {
-			if !family.required && errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("read %s node IP: %w", family.recordType, err)
-		}
-		if (address.To4() == nil) != family.ipv6 {
-			return nil, fmt.Errorf("node IP %q in %s is not %s", address, family.path, family.recordType)
-		}
-		addresses = append(addresses, DNSAddress{Address: address.String(), RecordType: family.recordType})
+	addresses := []DNSAddress{dnsAddress(primaryIP)}
+	secondaryPath, secondaryRecordType := ipv6Path, ipv6DNSRecordType
+	if primaryIP.To4() == nil {
+		secondaryPath, secondaryRecordType = ipv4Path, ipv4DNSRecordType
 	}
+
+	secondaryIP, err := GetIpFromFile(secondaryPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return addresses, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s node IP: %w", secondaryRecordType, err)
+	}
+	if (secondaryIP.To4() == nil) == (primaryIP.To4() == nil) {
+		return nil, fmt.Errorf("node IP %q in %s is not %s", secondaryIP, secondaryPath, secondaryRecordType)
+	}
+	addresses = append(addresses, dnsAddress(secondaryIP))
 
 	return addresses, nil
 }
