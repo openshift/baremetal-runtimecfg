@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -160,16 +161,20 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	return publishNodeIPFiles(chosenAddresses, nodeIpFile, nodeIpIpV4File, nodeIpIpV6File)
+}
+
+func publishNodeIPFiles(chosenAddresses []net.IP, primaryPath, ipv4Path, ipv6Path string) error {
 	ipv6Created, ipv4Created := false, false
 	for i := 0; i < len(chosenAddresses) && i < 2; i++ {
 		if utils.IsIPv6(chosenAddresses[i]) && !ipv6Created {
-			err = writeToFile(nodeIpIpV6File, chosenAddresses[i].String())
+			err := writeToFile(ipv6Path, chosenAddresses[i].String())
 			if err != nil {
 				return err
 			}
 			ipv6Created = true
 		} else if !utils.IsIPv6(chosenAddresses[i]) && !ipv4Created {
-			err = writeToFile(nodeIpIpV4File, chosenAddresses[i].String())
+			err := writeToFile(ipv4Path, chosenAddresses[i].String())
 			if err != nil {
 				return err
 			}
@@ -177,14 +182,20 @@ func set(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Publish the primary IP last so its presence indicates that all selected
-	// family files have been written.
-	err = writeToFile(nodeIpFile, nodeIP)
-	if err != nil {
-		return err
+	if !ipv4Created {
+		if err := os.Remove(ipv4Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if !ipv6Created {
+		if err := os.Remove(ipv6Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 
-	return nil
+	// Publish the primary IP last so its presence indicates that all selected
+	// family files have been written and stale family files have been removed.
+	return writeToFile(primaryPath, chosenAddresses[0].String())
 }
 
 func writeToFile(path string, data string) error {
@@ -193,19 +204,8 @@ func writeToFile(path string, data string) error {
 	if err != nil {
 		return err
 	}
-	log.Debugf("Opening path %s", path)
-	fileToCreate, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer fileToCreate.Close()
-
 	log.Infof("Writing path %s with content %s", path, data)
-	_, err = fileToCreate.WriteString(data)
-	if err != nil {
-		return err
-	}
-	return nil
+	return utils.WriteFileAtomically(path, []byte(data), 0644)
 }
 
 // checkAddressUsable verifies that the primary node IP (chosen[0]) is usable,

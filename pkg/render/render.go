@@ -2,7 +2,6 @@ package render
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"text/template"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
 const ext = ".tmpl"
@@ -47,26 +48,7 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 		return err
 	}
 
-	temporary, err := os.CreateTemp(filepath.Dir(renderPath), ".runtimecfg-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer func() {
-		if err := os.Remove(temporaryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			log.WithField("path", temporaryPath).WithError(err).Warn("Failed to remove temporary file")
-		}
-	}()
-	if err := temporary.Chmod(mode); err != nil {
-		return errors.Join(err, temporary.Close())
-	}
-	if _, err := temporary.Write(contents); err != nil {
-		return errors.Join(err, temporary.Close())
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, renderPath)
+	return utils.WriteFileAtomically(renderPath, contents, mode)
 }
 
 func renderTemplate(templatePath string, cfg interface{}) ([]byte, os.FileMode, error) {
