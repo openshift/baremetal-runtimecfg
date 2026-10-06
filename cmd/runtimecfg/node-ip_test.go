@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -326,5 +328,73 @@ var _ = Describe("checkAddressUsableInternal", func() {
 		p := &fakeProbe{}
 		Expect(checkAddressUsableInternal(nil, p.probe)).To(Succeed(), "empty input must be a no-op")
 		Expect(p.calls).To(BeEmpty(), "empty input must not be probed, recorded calls: %v", p.calls)
+	})
+})
+
+var _ = Describe("publishNodeIPFiles", func() {
+	var (
+		dir         string
+		primaryPath string
+		ipv4Path    string
+		ipv6Path    string
+	)
+
+	BeforeEach(func() {
+		var err error
+		dir, err = os.MkdirTemp("", "node-ip-test-")
+		Expect(err).ToNot(HaveOccurred())
+		primaryPath = filepath.Join(dir, "primary-ip")
+		ipv4Path = filepath.Join(dir, "ipv4")
+		ipv6Path = filepath.Join(dir, "ipv6")
+	})
+	AfterEach(func() {
+		Expect(os.RemoveAll(dir)).To(Succeed())
+	})
+
+	It("removes an unselected family before atomically publishing the primary IP", func() {
+		Expect(os.WriteFile(primaryPath, []byte("192.0.2.1"), 0644)).To(Succeed())
+		Expect(os.WriteFile(ipv6Path, []byte("2001:db8::1"), 0644)).To(Succeed())
+
+		ipv4 := net.ParseIP("192.0.2.2")
+		Expect(publishNodeIPFiles([]net.IP{ipv4}, primaryPath, ipv4Path, ipv6Path)).To(Succeed())
+
+		primary, err := os.ReadFile(primaryPath)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(string(primary)).To(Equal(ipv4.String()))
+		Expect(ipv4Path).To(BeAnExistingFile())
+		Expect(ipv6Path).ToNot(BeAnExistingFile())
+	})
+
+	It("removes a stale IPv4 file when only IPv6 is selected", func() {
+		Expect(os.WriteFile(ipv4Path, []byte("192.0.2.1"), 0644)).To(Succeed())
+
+		ipv6 := net.ParseIP("2001:db8::2")
+		Expect(publishNodeIPFiles([]net.IP{ipv6}, primaryPath, ipv4Path, ipv6Path)).To(Succeed())
+
+		Expect(ipv4Path).ToNot(BeAnExistingFile())
+		Expect(ipv6Path).To(BeAnExistingFile())
+	})
+
+	It("keeps the existing primary IP when removing an unselected family fails", func() {
+		const existingPrimary = "192.0.2.1"
+		Expect(os.WriteFile(primaryPath, []byte(existingPrimary), 0644)).To(Succeed())
+		Expect(os.Mkdir(ipv6Path, 0755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(ipv6Path, "entry"), []byte("stale"), 0644)).To(Succeed())
+
+		ipv4 := net.ParseIP("192.0.2.2")
+		Expect(publishNodeIPFiles([]net.IP{ipv4}, primaryPath, ipv4Path, ipv6Path)).ToNot(Succeed())
+
+		primary, err := os.ReadFile(primaryPath)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(string(primary)).To(Equal(existingPrimary))
+	})
+
+	It("publishes both selected family files", func() {
+		ipv4 := net.ParseIP("192.0.2.2")
+		ipv6 := net.ParseIP("2001:db8::2")
+
+		Expect(publishNodeIPFiles([]net.IP{ipv6, ipv4}, primaryPath, ipv4Path, ipv6Path)).To(Succeed())
+		Expect(ipv4Path).To(BeAnExistingFile())
+		Expect(ipv6Path).To(BeAnExistingFile())
 	})
 })

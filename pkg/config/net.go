@@ -4,14 +4,30 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/openshift/baremetal-runtimecfg/pkg/utils"
 )
 
+// GetNetworkManagerResolvConfPath chooses NetworkManager's non-stub resolver
+// input when available. A present but unusable no-stub file is intentionally
+// returned so callers report the error instead of silently using the stub.
+func GetNetworkManagerResolvConfPath(directory string) (string, error) {
+	noStub := filepath.Join(directory, "no-stub-resolv.conf")
+	if _, err := os.Lstat(noStub); err == nil {
+		return noStub, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	return filepath.Join(directory, "resolv.conf"), nil
+}
+
 const (
-	NodeIpIpV6File = "/run/nodeip-configuration/ipv6"
-	NodeIpIpV4File = "/run/nodeip-configuration/ipv4"
+	// NodeIPPrimaryFile contains the node address selected as primary.
+	NodeIPPrimaryFile = "/run/nodeip-configuration/primary-ip"
+	NodeIpIpV6File    = "/run/nodeip-configuration/ipv6"
+	NodeIpIpV4File    = "/run/nodeip-configuration/ipv4"
 )
 
 // Return ip from primaryIp file if file and ip exists and readable
@@ -22,7 +38,7 @@ func GetIpFromFile(filePath string) (net.IP, error) {
 		log.WithError(err).Infof("Failed to read ip from file %s", filePath)
 		return nil, err
 	}
-	ip := net.ParseIP(string(b))
+	ip := net.ParseIP(strings.TrimSpace(string(b)))
 	if ip == nil {
 		msg := fmt.Sprintf("Failed to parse ip from file %s", filePath)
 		log.Errorf("%s", msg)

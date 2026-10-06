@@ -7,16 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ghodss/yaml"
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -25,7 +29,11 @@ import (
 )
 
 const (
-	localhostKubeApiServerUrl string = "https://localhost:6443"
+	localhostKubeApiServerUrl    string = "https://localhost:6443"
+	maxDNSUpstreams                     = 15
+	ipv4DNSRecordType                   = "A"
+	ipv6DNSRecordType                   = "AAAA"
+	nodeIPDiscoveryRetryInterval        = time.Second
 	// labelNodeRolePrefix is a label prefix for node roles
 	labelNodeRolePrefix = "node-role.kubernetes.io/"
 	// highlyAvailableArbiterMode is the control plane topology when installing TNA
@@ -38,6 +46,21 @@ type NodeAddress struct {
 	Address string
 	Name    string
 	Ipv6    bool
+}
+
+// DNSAddress is a local node address and its DNS record type.
+type DNSAddress struct {
+	Address    string
+	RecordType string
+}
+
+type nodeIPPaths struct {
+	primary, ipv4, ipv6 string
+}
+
+type localAddresses struct {
+	addresses      []netip.Addr
+	interfaceNames map[int]string
 }
 
 type Cluster struct {
@@ -88,6 +111,7 @@ type Node struct {
 	ShortHostname string
 	VRRPInterface string
 	DNSUpstreams  []string
+	DNSAddresses  []DNSAddress
 	IngressConfig IngressConfig
 	EnableUnicast bool
 	Configs       *[]Node
@@ -154,9 +178,9 @@ func getDNSUpstreams(resolvConfPath string) (upstreams []string, err error) {
 		switch fields[0] {
 		case "nameserver":
 			// CoreDNS forward plugin takes up to 15 upstream servers
-			if len(fields) > 1 && len(upstreams) < 15 {
+			if len(fields) > 1 && len(upstreams) < maxDNSUpstreams {
+				upstreams = append(upstreams, fields[1])
 			}
-			upstreams = append(upstreams, fields[1])
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -647,6 +671,151 @@ func GetConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVips
 	return nodes[0], nil
 }
 
+// GetConfigWithNodeIP builds the local, API-independent CoreDNS configuration.
+// It reads only local node-IP inputs, resolver inputs, and cluster names.
+// An empty resolver path selects NetworkManager's upstream file on each call.
+func GetConfigWithNodeIP(ctx context.Context, kubeconfigPath, clusterConfigPath, resolvConfPath string) (Node, error) {
+	if resolvConfPath == "" {
+		var err error
+		resolvConfPath, err = GetNetworkManagerResolvConfPath("/run/NetworkManager")
+		if err != nil {
+			return Node{}, err
+		}
+	}
+	return getConfigWithNodeIP(ctx, kubeconfigPath, clusterConfigPath, resolvConfPath,
+		nodeIPPaths{NodeIPPrimaryFile, NodeIpIpV4File, NodeIpIpV6File}, getLocalAddresses)
+}
+
+func getLocalAddresses() (localAddresses, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return localAddresses{}, err
+	}
+	return collectInterfaceAddresses(interfaces, (*net.Interface).Addrs)
+}
+
+func collectInterfaceAddresses(interfaces []net.Interface, addrs func(*net.Interface) ([]net.Addr, error)) (localAddresses, error) {
+	local := localAddresses{interfaceNames: make(map[int]string, len(interfaces))}
+	for _, iface := range interfaces {
+		local.interfaceNames[iface.Index] = iface.Name
+		ifaceAddresses, err := addrs(&iface)
+		if err != nil {
+			return localAddresses{}, err
+		}
+		for _, interfaceAddress := range ifaceAddresses {
+			prefix, err := netip.ParsePrefix(interfaceAddress.String())
+			if err != nil {
+				continue
+			}
+			address := prefix.Addr().Unmap()
+			if address.Is6() && address.IsLinkLocalUnicast() {
+				address = address.WithZone(iface.Name)
+			}
+			local.addresses = append(local.addresses, address)
+		}
+	}
+	return local, nil
+}
+
+func getConfigWithNodeIP(ctx context.Context, kubeconfigPath, clusterConfigPath, resolvConfPath string, paths nodeIPPaths, collect func() (localAddresses, error)) (Node, error) {
+	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
+	if err != nil {
+		return Node{}, err
+	}
+	addresses, err := waitForNodeIPs(ctx, paths)
+	if err != nil {
+		return Node{}, err
+	}
+	local, err := collect()
+	if err != nil {
+		return Node{}, fmt.Errorf("collect local interface addresses: %w", err)
+	}
+	for _, address := range addresses {
+		local.addresses = append(local.addresses, netip.MustParseAddr(address.Address))
+	}
+	upstreams, err := getFilteredDNSUpstreams(resolvConfPath, local)
+	if err != nil {
+		return Node{}, err
+	}
+	shortHostname, err := utils.ShortHostname()
+	if err != nil {
+		return Node{}, err
+	}
+	node := Node{
+		Cluster:       Cluster{Name: clusterName, Domain: clusterDomain},
+		NonVirtualIP:  addresses[0].Address,
+		ShortHostname: shortHostname,
+		DNSAddresses:  addresses,
+		DNSUpstreams:  upstreams,
+	}
+	node.Configs = &[]Node{node}
+	return node, nil
+}
+
+func waitForNodeIPs(ctx context.Context, paths nodeIPPaths) ([]DNSAddress, error) {
+	var addresses []DNSAddress
+	err := wait.PollUntilContextCancel(ctx, nodeIPDiscoveryRetryInterval, true, func(ctx context.Context) (bool, error) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		var err error
+		addresses, err = discoverNodeIPs(paths.primary, paths.ipv4, paths.ipv6)
+		if err != nil {
+			log.WithError(err).Info("Waiting for node IP configuration")
+			return false, nil
+		}
+		return true, nil
+	})
+	return addresses, err
+}
+
+func discoverNodeIPs(primaryPath, ipv4Path, ipv6Path string) ([]DNSAddress, error) {
+	primaryIP, err := GetIpFromFile(primaryPath)
+	if err != nil {
+		return nil, fmt.Errorf("read primary node IP: %w", err)
+	}
+
+	dnsAddress := func(address net.IP) DNSAddress {
+		recordType := ipv6DNSRecordType
+		if address.To4() != nil {
+			recordType = ipv4DNSRecordType
+		}
+		return DNSAddress{Address: address.String(), RecordType: recordType}
+	}
+
+	addresses := []DNSAddress{dnsAddress(primaryIP)}
+	secondaryPath, secondaryRecordType := ipv6Path, ipv6DNSRecordType
+	if primaryIP.To4() == nil {
+		secondaryPath, secondaryRecordType = ipv4Path, ipv4DNSRecordType
+	}
+
+	secondaryIP, err := GetIpFromFile(secondaryPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return addresses, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s node IP: %w", secondaryRecordType, err)
+	}
+	if (secondaryIP.To4() == nil) == (primaryIP.To4() == nil) {
+		return nil, fmt.Errorf("node IP %q in %s is not %s", secondaryIP, secondaryPath, secondaryRecordType)
+	}
+	addresses = append(addresses, dnsAddress(secondaryIP))
+
+	return addresses, nil
+}
+
+func getFilteredDNSUpstreams(resolvConfPath string, local localAddresses) ([]string, error) {
+	upstreams, err := getDNSUpstreams(resolvConfPath)
+	if err != nil {
+		return nil, err
+	}
+	upstreams = filterDNSUpstreams(upstreams, local)
+	if len(upstreams) == 0 {
+		return nil, errors.New("no usable DNS upstream servers found")
+	}
+	return upstreams, nil
+}
+
 func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, platformType string, controlPlaneTopology string) (node Node, err error) {
 	clusterName, clusterDomain, err := GetClusterNameAndDomain(kubeconfigPath, clusterConfigPath)
 	if err != nil {
@@ -675,22 +844,22 @@ func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, api
 		return node, err
 	}
 
-	node.Cluster.APIVIPRecordType = "A"
-	node.Cluster.APIVIPEmptyType = "AAAA"
+	node.Cluster.APIVIPRecordType = ipv4DNSRecordType
+	node.Cluster.APIVIPEmptyType = ipv6DNSRecordType
 	if apiVip != nil {
 		node.Cluster.APIVIP = apiVip.String()
 		if apiVip.To4() == nil {
-			node.Cluster.APIVIPRecordType = "AAAA"
-			node.Cluster.APIVIPEmptyType = "A"
+			node.Cluster.APIVIPRecordType = ipv6DNSRecordType
+			node.Cluster.APIVIPEmptyType = ipv4DNSRecordType
 		}
 	}
-	node.Cluster.IngressVIPRecordType = "A"
-	node.Cluster.IngressVIPEmptyType = "AAAA"
+	node.Cluster.IngressVIPRecordType = ipv4DNSRecordType
+	node.Cluster.IngressVIPEmptyType = ipv6DNSRecordType
 	if ingressVip != nil {
 		node.Cluster.IngressVIP = ingressVip.String()
 		if ingressVip.To4() == nil {
-			node.Cluster.IngressVIPRecordType = "AAAA"
-			node.Cluster.IngressVIPEmptyType = "A"
+			node.Cluster.IngressVIPRecordType = ipv6DNSRecordType
+			node.Cluster.IngressVIPEmptyType = ipv4DNSRecordType
 		}
 	}
 	// Rest of the Node config will not be available on Cloud platforms.
@@ -997,11 +1166,17 @@ func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPa
 	nodeAddrs, err := utils.AddressesDefault(false, utils.ValidNodeAddress)
 	if err != nil {
 		// Don't fail rendering over an inability to enumerate local addresses;
-		// fall back to filtering loopback only.
-		log.Warningf("Failed to determine node addresses, DNS upstreams will only be filtered for loopback: %s", err)
+		// continue without excluding node addresses.
+		log.Warningf("Failed to determine node addresses, DNS upstreams will be filtered without node addresses: %s", err)
 		nodeAddrs = nil
 	}
-	node.DNSUpstreams = filterDNSUpstreams(resolvConfUpstreams, nodeAddrs)
+	local := localAddresses{}
+	for _, ip := range nodeAddrs {
+		if address, ok := netip.AddrFromSlice(ip); ok {
+			local.addresses = append(local.addresses, address)
+		}
+	}
+	node.DNSUpstreams = filterDNSUpstreams(resolvConfUpstreams, local)
 	// Having no DNS Upstream servers is invalid. Return error so init
 	// container can retry.
 	if len(node.DNSUpstreams) < 1 {
@@ -1010,36 +1185,53 @@ func updateNodewithCloudInfo(apiLBIP, apiIntLBIP, ingressIP net.IP, resolvConfPa
 	return node, nil
 }
 
-// filterDNSUpstreams returns the resolv.conf nameservers that are valid CoreDNS
-// forward upstreams, dropping unparseable entries, loopback addresses, and any
-// of the node's own addresses. A hostNetwork CoreDNS listening on the node IP
-// would loop if it forwarded queries back to that same address, so those
-// entries are removed.
-func filterDNSUpstreams(resolvConfUpstreams []string, nodeAddrs []net.IP) []string {
-	upstreams := make([]string, 0)
-	for _, upstream := range resolvConfUpstreams {
-		upstreamIP := net.ParseIP(upstream)
-		if upstreamIP == nil {
-			continue
-		}
-		if upstreamIP.IsLoopback() {
-			continue
-		}
-		isNodeAddr := false
-		for _, addr := range nodeAddrs {
-			if addr.Equal(upstreamIP) {
-				isNodeAddr = true
-				break
-			}
-		}
-		if isNodeAddr {
-			log.Infof("Skipping node-local address %s as DNS upstream", upstream)
-			continue
-		}
-		log.Infof("Adding %s as DNS Upstream", upstream)
-		upstreams = append(upstreams, upstream)
+// filterDNSUpstreams returns distinct, normalized resolv.conf nameservers,
+// excluding invalid, loopback, unspecified, and node-local addresses. IPv6
+// link-local addresses retain their interface scope.
+func filterDNSUpstreams(upstreams []string, local localAddresses) []string {
+	excluded := make(map[netip.Addr]struct{}, len(local.addresses))
+	for _, address := range local.addresses {
+		excluded[normalizeAddress(address, local.interfaceNames)] = struct{}{}
 	}
-	return upstreams
+
+	filtered := make([]string, 0, len(upstreams))
+	seen := make(map[netip.Addr]struct{})
+	for _, upstream := range upstreams {
+		address, err := netip.ParseAddr(upstream)
+		if err != nil {
+			continue
+		}
+		address = normalizeAddress(address, local.interfaceNames)
+		if address.IsLoopback() || address.IsUnspecified() {
+			continue
+		}
+		if _, found := excluded[address]; found {
+			continue
+		}
+		// An unscoped local address excludes that address on every interface.
+		if _, found := excluded[address.WithZone("")]; found {
+			continue
+		}
+		if _, found := seen[address]; found {
+			continue
+		}
+		seen[address] = struct{}{}
+		filtered = append(filtered, address.String())
+	}
+	return filtered
+}
+
+func normalizeAddress(address netip.Addr, interfaceNames map[int]string) netip.Addr {
+	address = address.Unmap()
+	if !address.IsLinkLocalUnicast() {
+		return address.WithZone("")
+	}
+	if index, err := strconv.Atoi(address.Zone()); err == nil {
+		if name, found := interfaceNames[index]; found {
+			address = address.WithZone(name)
+		}
+	}
+	return address
 }
 
 func PopulateCloudLBIPAddresses(clusterLBConfig ClusterLBConfig, node Node) (updatedNode Node, err error) {
