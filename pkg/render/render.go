@@ -38,6 +38,30 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 		}).Error("Failed to parse template")
 		return err
 	}
+	templateStat, err := os.Stat(templatePath)
+	if err != nil {
+		log.WithFields(logrus.Fields{
+			"path": templatePath,
+		}).Error("Failed to stat template")
+		return err
+	}
+
+	buf := &bytes.Buffer{}
+	if err := tmpl.Execute(buf, cfg); err != nil {
+		log.WithFields(logrus.Fields{
+			"path": templatePath,
+		}).Error("Failed to render template")
+		return err
+	}
+	contents := buf.Bytes()
+	mode := templateStat.Mode()
+
+	if info, err := os.Stat(renderPath); err == nil && info.Mode().IsRegular() && info.Mode().Perm() == mode.Perm() {
+		existing, err := os.ReadFile(renderPath)
+		if err == nil && bytes.Equal(existing, contents) {
+			return nil
+		}
+	}
 
 	renderFile, err := os.Create(renderPath)
 	if err != nil {
@@ -49,14 +73,7 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	defer renderFile.Close()
 
 	// Make sure we propagate any special permissions
-	templateStat, err := os.Stat(templatePath)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": templatePath,
-		}).Error("Failed to stat template")
-		return err
-	}
-	err = os.Chmod(renderPath, templateStat.Mode())
+	err = os.Chmod(renderPath, mode)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"path": renderPath,
@@ -64,17 +81,9 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 		return err
 	}
 
-	buf := &bytes.Buffer{}
-	err = tmpl.Execute(buf, cfg)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"path": renderPath,
-		}).Error("Failed to render template")
-		return err
-	}
 	// The string we get back is a single line with \n's. For readability,
 	// split it and write it line-by-line.
-	lines := strings.Split(buf.String(), "\n")
+	lines := strings.Split(string(contents), "\n")
 	for _, line := range lines {
 		log.Info(line)
 	}
@@ -82,7 +91,8 @@ func RenderFile(renderPath, templatePath string, cfg interface{}) error {
 	log.WithFields(logrus.Fields{
 		"path": renderPath,
 	}).Info("Runtimecfg rendering template")
-	return tmpl.Execute(renderFile, cfg)
+	_, err = renderFile.Write(contents)
+	return err
 }
 
 func Render(outDir string, paths []string, cfg interface{}) error {
@@ -93,6 +103,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 			log.WithFields(logrus.Fields{
 				"path": paths[0],
 			}).Error("Failed to stat file")
+			return err
 		}
 		if fi.Mode().IsDir() {
 			templateDir := paths[0]
@@ -126,6 +137,7 @@ func Render(outDir string, paths []string, cfg interface{}) error {
 				"path": templatePath,
 				"err":  err,
 			}).Error("Failed to render template")
+			return err
 		}
 	}
 	return nil
