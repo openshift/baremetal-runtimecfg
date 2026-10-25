@@ -128,8 +128,8 @@ func usableIPv6Route(route netlink.Route) bool {
 	if net.IPv6len != len(route.Dst.IP) {
 		return false
 	}
-	// Ignore non-advertised routes
-	if route.Protocol != unix.RTPROT_RA {
+	// Newer netlink versions report default routes as ::/0 instead of a nil Dst
+	if ones, _ := route.Dst.Mask.Size(); ones == 0 {
 		return false
 	}
 
@@ -172,6 +172,10 @@ func addressesRoutingInternal(vips []net.IP, af AddressFilter, getAddrs addressM
 				}
 				if routes, ok := routeMap[link.Attrs().Index]; ok {
 					for _, route := range routes {
+						// Non-RA routes only count if they are on-link and cover the address
+						if route.Protocol != unix.RTPROT_RA && (route.Gw != nil || !route.Dst.Contains(address.IP)) {
+							continue
+						}
 						log.Debugf("Checking route %+v (mask %s) for address %+v", route, route.Dst.Mask, address)
 						containmentNet := net.IPNet{IP: address.IP, Mask: route.Dst.Mask}
 						for _, vip := range vips {
