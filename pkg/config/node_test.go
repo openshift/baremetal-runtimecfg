@@ -293,9 +293,12 @@ func TestGetFilteredDNSUpstreams(t *testing.T) {
 	local := localAddresses{addresses: []netip.Addr{netip.MustParseAddr("192.0.2.10")}}
 	for _, input := range []string{"", "nameserver\n", "nameserver 127.0.0.1\nnameserver 192.0.2.10\n"} {
 		writeDNSFixture(t, path, input)
-		if _, err := getFilteredDNSUpstreams(path, local); err == nil {
-			t.Fatalf("accepted resolver input without usable upstreams: %q", input)
+		if got, err := getFilteredDNSUpstreams(path, local); err != nil || len(got) != 0 {
+			t.Fatalf("resolver input without usable upstreams %q: got %v, error: %v", input, got, err)
 		}
+	}
+	if _, err := getFilteredDNSUpstreams(filepath.Join(t.TempDir(), "missing"), local); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lost resolver read error: %v", err)
 	}
 	input := "nameserver 127.0.0.1\n"
 	for i := 1; i <= maxDNSUpstreams+1; i++ {

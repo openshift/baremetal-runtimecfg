@@ -804,16 +804,14 @@ func discoverNodeIPs(primaryPath, ipv4Path, ipv6Path string) ([]DNSAddress, erro
 	return addresses, nil
 }
 
+// getFilteredDNSUpstreams may return no upstreams. The Corefile then omits
+// forwarding, so CoreDNS still answers cluster records.
 func getFilteredDNSUpstreams(resolvConfPath string, local localAddresses) ([]string, error) {
 	upstreams, err := getDNSUpstreams(resolvConfPath)
 	if err != nil {
 		return nil, err
 	}
-	upstreams = filterDNSUpstreams(upstreams, local)
-	if len(upstreams) == 0 {
-		return nil, errors.New("no usable DNS upstream servers found")
-	}
-	return upstreams, nil
+	return filterDNSUpstreams(upstreams, local), nil
 }
 
 func getNodeConfig(kubeconfigPath, clusterConfigPath, resolvConfPath string, apiVip net.IP, ingressVip net.IP, apiPort, lbPort, statPort uint16, platformType string, controlPlaneTopology string) (node Node, err error) {
