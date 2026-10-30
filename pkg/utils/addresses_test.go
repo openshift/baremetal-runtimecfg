@@ -326,6 +326,45 @@ func ipv6MultipleRouteMap(rf RouteFilter) (map[int][]netlink.Route, error) {
 	return routes, nil
 }
 
+func ipv6Slash128AddrMap(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
+	addrs := make(map[netlink.Link][]netlink.Addr)
+	maybeAddAddress(addrs, af, lo, "::1/128", false, "")
+	maybeAddAddress(addrs, af, eth0, "fd00:1::10/128", false, "")
+	maybeAddAddress(addrs, af, eth0, "fe80::1234/64", false, "")
+	return addrs, nil
+}
+
+func ipv6Slash128RouteMapRA(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddRoute(routes, rf, eth0, "", true, 100, "fd00:1::1")
+	maybeAddRoute(routes, rf, eth0, "fd00:1::/64", true, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fe80::/64", false, 256, "")
+	return routes, nil
+}
+
+func ipv6Slash128RouteMapStatic(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddRoute(routes, rf, eth0, "", false, 100, "fd00:1::1")
+	maybeAddRoute(routes, rf, eth0, "fd00:1::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fe80::/64", false, 256, "")
+	return routes, nil
+}
+
+func ipv6Slash128RouteMapStaticOtherPrefix(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddRoute(routes, rf, eth0, "", false, 100, "fd00:1::1")
+	maybeAddRoute(routes, rf, eth0, "fd02::/64", false, 100, "")
+	maybeAddRoute(routes, rf, eth0, "fe80::/64", false, 256, "")
+	return routes, nil
+}
+
+func ipv6Slash128RouteMapExplicitDefault(rf RouteFilter) (map[int][]netlink.Route, error) {
+	routes := make(map[int][]netlink.Route)
+	maybeAddRoute(routes, rf, eth0, "::/0", false, 100, "fd00:1::1")
+	maybeAddRoute(routes, rf, eth0, "fe80::/64", false, 256, "")
+	return routes, nil
+}
+
 var _ = Describe("addresses", func() {
 	It("matches an IPv4 VIP on the primary interface", func() {
 		addrs, err := addressesRoutingInternal(
@@ -626,6 +665,54 @@ var _ = Describe("addresses", func() {
 		// Should return addresses in alphanumeric order: 2001:db8::1, 2001:db8::2, 2001:db8::3
 		// Since we only take one IPv6 address, it should be the first one: 2001:db8::1
 		Expect(addrs).To(Equal([]net.IP{net.ParseIP("2001:db8::1")}))
+	})
+
+	It("matches an IPv6 VIP for a /128 address with an advertised prefix route", func() {
+		addrs, err := addressesRoutingInternal(
+			[]net.IP{net.ParseIP("fd00:1::1")},
+			ValidNodeAddress,
+			ipv6Slash128AddrMap,
+			ipv6Slash128RouteMapRA,
+			true,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00:1::10")}))
+	})
+
+	It("matches an IPv6 VIP for a /128 address with a static prefix route", func() {
+		addrs, err := addressesRoutingInternal(
+			[]net.IP{net.ParseIP("fd00:1::1")},
+			ValidNodeAddress,
+			ipv6Slash128AddrMap,
+			ipv6Slash128RouteMapStatic,
+			true,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("fd00:1::10")}))
+	})
+
+	It("ignores static routes that don't cover a /128 address", func() {
+		addrs, err := addressesRoutingInternal(
+			[]net.IP{net.ParseIP("fd00:1::1")},
+			ValidNodeAddress,
+			ipv6Slash128AddrMap,
+			ipv6Slash128RouteMapStaticOtherPrefix,
+			true,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(BeEmpty())
+	})
+
+	It("ignores a default route reported as ::/0 for a /128 address", func() {
+		addrs, err := addressesRoutingInternal(
+			[]net.IP{net.ParseIP("fd00:9::1")},
+			ValidNodeAddress,
+			ipv6Slash128AddrMap,
+			ipv6Slash128RouteMapExplicitDefault,
+			true,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(BeEmpty())
 	})
 })
 
