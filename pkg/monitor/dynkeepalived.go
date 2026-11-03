@@ -328,6 +328,13 @@ func KeepalivedWatch(kubeconfigPath, clusterConfigPath, templatePath, cfgPath st
 		return err
 	}
 	defer conn.Close()
+	// The node may be rebooting/shutting down when this function exits -
+	// whether via SIGTERM (ctx.Done) or an error return, e.g. the draining
+	// apiserver failing a config fetch. Make sure no stale VIP survives
+	// into the shutdown window (OCPBUGS-109633). This is a no-op unless the
+	// host itself is shutting down, so ordinary pod restarts and runtime
+	// errors on a healthy node never touch the VIPs.
+	defer handleShutdownResign(conn, append(append([]net.IP{}, apiVips...), ingressVips...))
 	for {
 		select {
 		case <-ctx.Done():
