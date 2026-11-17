@@ -70,6 +70,7 @@ var params struct {
 	networkType   string
 	platform      string
 	dualStack     bool
+	singleStack   bool
 }
 
 // init executes upon import
@@ -82,6 +83,7 @@ func init() {
 	nodeIPCmd.PersistentFlags().BoolVarP(&params.userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
 	nodeIPCmd.PersistentFlags().StringVarP(&params.platform, "platform", "p", "", "Cluster platform")
 	nodeIPCmd.PersistentFlags().BoolVar(&params.dualStack, "dual-stack", false, "Cluster is configured as dual-stack; with --retry-on-failure, wait indefinitely for both address families before writing configuration")
+	nodeIPCmd.PersistentFlags().BoolVar(&params.singleStack, "single-stack", false, "Cluster is configured as single-stack; only consider addresses of the cluster's family (IPv6 with --prefer-ipv6, IPv4 otherwise). With --retry-on-failure, wait until such an address is available")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
@@ -91,7 +93,7 @@ func show(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, params.dualStack)
+	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, params.dualStack, params.singleStack)
 	if err != nil {
 		return err
 	}
@@ -116,7 +118,7 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, params.dualStack)
+	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, params.dualStack, params.singleStack)
 	if err != nil {
 		return err
 	}
@@ -277,8 +279,8 @@ type ipDiscoverer struct {
 // IPv6 node IPs live on different interfaces, only one family is found and the
 // node will wait for the missing family indefinitely. Dual-stack node IPs are
 // expected to share a single interface.
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack bool) (chosen []net.IP, matchesVips bool, err error) {
-	return getSuitableIPsInternal(retry, vips, preferIPv6, networkType, dualStack, ipDiscoverer{
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack, singleStack bool) (chosen []net.IP, matchesVips bool, err error) {
+	return getSuitableIPsInternal(retry, vips, preferIPv6, networkType, dualStack, singleStack, ipDiscoverer{
 		routing:   utils.AddressesRouting,
 		byDefault: utils.AddressesDefault,
 		usable:    checkAddressUsable,
@@ -286,7 +288,11 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 	})
 }
 
-func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack bool, d ipDiscoverer) (chosen []net.IP, matchesVips bool, err error) {
+func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack, singleStack bool, d ipDiscoverer) (chosen []net.IP, matchesVips bool, err error) {
+	if dualStack && singleStack {
+		return nil, false, fmt.Errorf("--dual-stack and --single-stack are mutually exclusive")
+	}
+
 	// timerLoop will hold a time in Seconds to be used with sleep before going
 	// for the next loop interation.
 	timerLoop := 1
@@ -321,6 +327,9 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 		}
 		if len(vips) > 0 {
 			chosen, err = d.routing(vips, ipFilterFunc, preferIPv6)
+			if err == nil && singleStack {
+				chosen = filterClusterFamily(chosen, preferIPv6)
+			}
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = d.usable(chosen)
@@ -346,6 +355,9 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 				ipFilterFunc = utils.ValidOVNNodeAddress
 			}
 			chosen, err = d.byDefault(preferIPv6, ipFilterFunc)
+			if err == nil && singleStack {
+				chosen = filterClusterFamily(chosen, preferIPv6)
+			}
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = d.usable(chosen)
@@ -374,6 +386,24 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 		log.Errorf("Failed to find a suitable node IP")
 		d.sleep(time.Second * time.Duration(timerLoop))
 	}
+}
+
+// filterClusterFamily drops addresses that are not of the cluster's IP family
+// on a single-stack cluster. Address selection orders candidates by default
+// route metric and interface index before IP family, so without this an
+// address of the other family (for example an IPv4 address with a default
+// route on a management NIC of an IPv6 single-stack node) can be chosen as the
+// node IP, or be added as a second node IP.
+func filterClusterFamily(ips []net.IP, ipv6 bool) []net.IP {
+	kept := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if utils.IsIPv6(ip) == ipv6 {
+			kept = append(kept, ip)
+		} else {
+			log.Infof("Ignoring %s: not in the cluster's IP family on a single-stack cluster", ip)
+		}
+	}
+	return kept
 }
 
 func parseIPs(args []string) ([]net.IP, error) {
