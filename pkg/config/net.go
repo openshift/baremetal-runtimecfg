@@ -35,7 +35,9 @@ const (
 func GetIpFromFile(filePath string) (net.IP, error) {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		log.WithError(err).Infof("Failed to read ip from file %s", filePath)
+		if !os.IsNotExist(err) {
+			log.WithError(err).Infof("Failed to read ip from file %s", filePath)
+		}
 		return nil, err
 	}
 	ip := net.ParseIP(strings.TrimSpace(string(b)))
