@@ -70,6 +70,7 @@ var params struct {
 	networkType   string
 	platform      string
 	dualStack     bool
+	singleStack   bool
 }
 
 // init executes upon import
@@ -82,16 +83,22 @@ func init() {
 	nodeIPCmd.PersistentFlags().BoolVarP(&params.userManagedLB, "user-managed-lb", "l", false, "User managed load balancer")
 	nodeIPCmd.PersistentFlags().StringVarP(&params.platform, "platform", "p", "", "Cluster platform")
 	nodeIPCmd.PersistentFlags().BoolVar(&params.dualStack, "dual-stack", false, "Cluster is configured as dual-stack; with --retry-on-failure, wait indefinitely for both address families before writing configuration")
+	nodeIPCmd.PersistentFlags().BoolVar(&params.singleStack, "single-stack", false, "Cluster is configured as single-stack; only use addresses of the cluster's family (IPv6 with --prefer-ipv6, IPv4 otherwise)")
 	rootCmd.AddCommand(nodeIPCmd)
 }
 
 func show(cmd *cobra.Command, args []string) error {
+	stack, err := stackFromFlags(params.dualStack, params.singleStack)
+	if err != nil {
+		return err
+	}
+
 	vips, err := parseIPs(args)
 	if err != nil {
 		return err
 	}
 
-	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, params.dualStack)
+	chosenAddresses, _, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, stack)
 	if err != nil {
 		return err
 	}
@@ -103,6 +110,11 @@ func show(cmd *cobra.Command, args []string) error {
 
 func set(cmd *cobra.Command, args []string) error {
 	log.Infof("NodeIp started with params: %+v", params)
+
+	stack, err := stackFromFlags(params.dualStack, params.singleStack)
+	if err != nil {
+		return err
+	}
 
 	// If primary ip address was already created, it means that nodeip-configuration has run already and no need to
 	// choose new ip, we should leave same configuration as we already set
@@ -116,7 +128,7 @@ func set(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, params.dualStack)
+	chosenAddresses, matchesVips, err := getSuitableIPs(params.retry, vips, params.preferIPv6, params.networkType, stack)
 	if err != nil {
 		return err
 	}
@@ -267,7 +279,7 @@ type ipDiscoverer struct {
 }
 
 // getSuitableIPs returns the node IP(s) to configure. On a dual-stack cluster
-// (dualStack) with retry enabled it blocks until BOTH address families are
+// (stackDual) with retry enabled it blocks until BOTH address families are
 // available, so nodeip-configuration never writes a single-family (partial)
 // configuration.
 //
@@ -277,8 +289,8 @@ type ipDiscoverer struct {
 // IPv6 node IPs live on different interfaces, only one family is found and the
 // node will wait for the missing family indefinitely. Dual-stack node IPs are
 // expected to share a single interface.
-func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack bool) (chosen []net.IP, matchesVips bool, err error) {
-	return getSuitableIPsInternal(retry, vips, preferIPv6, networkType, dualStack, ipDiscoverer{
+func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType string, stack ipStack) (chosen []net.IP, matchesVips bool, err error) {
+	return getSuitableIPsInternal(retry, vips, preferIPv6, networkType, stack, ipDiscoverer{
 		routing:   utils.AddressesRouting,
 		byDefault: utils.AddressesDefault,
 		usable:    checkAddressUsable,
@@ -286,7 +298,9 @@ func getSuitableIPs(retry bool, vips []net.IP, preferIPv6 bool, networkType stri
 	})
 }
 
-func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkType string, dualStack bool, d ipDiscoverer) (chosen []net.IP, matchesVips bool, err error) {
+func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkType string, stack ipStack, d ipDiscoverer) (chosen []net.IP, matchesVips bool, err error) {
+	dualStack := stack == stackDual
+
 	// timerLoop will hold a time in Seconds to be used with sleep before going
 	// for the next loop interation.
 	timerLoop := 1
@@ -321,6 +335,9 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 		}
 		if len(vips) > 0 {
 			chosen, err = d.routing(vips, ipFilterFunc, preferIPv6)
+			if err == nil && stack == stackSingle {
+				chosen = utils.FilterIPFamilies(chosen, !preferIPv6, preferIPv6)
+			}
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = d.usable(chosen)
@@ -346,6 +363,9 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 				ipFilterFunc = utils.ValidOVNNodeAddress
 			}
 			chosen, err = d.byDefault(preferIPv6, ipFilterFunc)
+			if err == nil && stack == stackSingle {
+				chosen = utils.FilterIPFamilies(chosen, !preferIPv6, preferIPv6)
+			}
 			if len(chosen) > 0 || err != nil {
 				if err == nil {
 					err = d.usable(chosen)
@@ -374,6 +394,27 @@ func getSuitableIPsInternal(retry bool, vips []net.IP, preferIPv6 bool, networkT
 		log.Errorf("Failed to find a suitable node IP")
 		d.sleep(time.Second * time.Duration(timerLoop))
 	}
+}
+
+// ipStack is the cluster's IP stack; stackUnknown keeps the old behavior.
+type ipStack int
+
+const (
+	stackUnknown ipStack = iota
+	stackSingle
+	stackDual
+)
+
+func stackFromFlags(dualStack, singleStack bool) (ipStack, error) {
+	switch {
+	case dualStack && singleStack:
+		return stackUnknown, fmt.Errorf("--dual-stack and --single-stack are mutually exclusive")
+	case dualStack:
+		return stackDual, nil
+	case singleStack:
+		return stackSingle, nil
+	}
+	return stackUnknown, nil
 }
 
 func parseIPs(args []string) ([]net.IP, error) {

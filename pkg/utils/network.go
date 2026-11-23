@@ -24,6 +24,16 @@ func IsIPv6(ip net.IP) bool {
 	return strings.Contains(ip.String(), ":")
 }
 
+func FilterIPFamilies(ips []net.IP, ipv4, ipv6 bool) []net.IP {
+	kept := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if (ipv4 && IsIPv4(ip)) || (ipv6 && IsIPv6(ip)) {
+			kept = append(kept, ip)
+		}
+	}
+	return kept
+}
+
 func IsNetIPv6(network net.IPNet) bool {
 	if IsIPv6(network.IP) {
 		return true
