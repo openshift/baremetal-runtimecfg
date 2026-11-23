@@ -186,7 +186,7 @@ var _ = Describe("getSuitableIPsInternal", func() {
 			defaults = append(defaults, []net.IP{ipv4, ipv6}) // both families -> return
 
 			f := &fakeDiscoverer{defaultResults: defaults}
-			chosen, _, err := getSuitableIPsInternal(true, nil, false, ovn, true, false, f.discoverer())
+			chosen, _, err := getSuitableIPsInternal(true, nil, false, ovn, stackDual, f.discoverer())
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(hasBothIPFamilies(chosen)).To(BeTrue())
@@ -216,7 +216,7 @@ var _ = Describe("getSuitableIPsInternal", func() {
 			defaults = append(defaults, []net.IP{ipv4, ipv6})
 
 			f := &fakeDiscoverer{defaultResults: defaults}
-			chosen, matchesVips, err := getSuitableIPsInternal(true, nil, false, ovn, true, false, f.discoverer())
+			chosen, matchesVips, err := getSuitableIPsInternal(true, nil, false, ovn, stackDual, f.discoverer())
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(matchesVips).To(BeFalse())
@@ -231,7 +231,7 @@ var _ = Describe("getSuitableIPsInternal", func() {
 
 		It("does not wait for a one-shot (no retry) caller, even on dual-stack", func() {
 			f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv6}}}
-			chosen, _, err := getSuitableIPsInternal(false, nil, false, ovn, true, false, f.discoverer())
+			chosen, _, err := getSuitableIPsInternal(false, nil, false, ovn, stackDual, f.discoverer())
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(chosen).To(HaveLen(1))
@@ -242,7 +242,7 @@ var _ = Describe("getSuitableIPsInternal", func() {
 
 		It("returns immediately with a single family when the cluster is not dual-stack", func() {
 			f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv4}}}
-			chosen, _, err := getSuitableIPsInternal(true, nil, false, ovn, false, false, f.discoverer())
+			chosen, _, err := getSuitableIPsInternal(true, nil, false, ovn, stackUnknown, f.discoverer())
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(chosen).To(HaveLen(1))
@@ -263,7 +263,7 @@ var _ = Describe("getSuitableIPsInternal", func() {
 			routing = append(routing, []net.IP{ipv4, ipv6})
 
 			f := &fakeDiscoverer{routingResults: routing}
-			chosen, matchesVips, err := getSuitableIPsInternal(true, vips, false, ovn, true, false, f.discoverer())
+			chosen, matchesVips, err := getSuitableIPsInternal(true, vips, false, ovn, stackDual, f.discoverer())
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(matchesVips).To(BeTrue())
@@ -275,88 +275,92 @@ var _ = Describe("getSuitableIPsInternal", func() {
 })
 
 var _ = Describe("getSuitableIPsInternal on single-stack clusters", func() {
-	// An IPv6 single-stack node whose management NIC also has an IPv4 address
-	// and an IPv4 default route (for example from DHCP). Address selection
-	// orders by route metric and interface index before IP family, so the
-	// IPv4 address can come first.
-	mgmtIPv4 := net.ParseIP("192.168.50.20")
-	nodeIPv6 := net.ParseIP("2001:db8:0:1::97")
+	// Single-stack cluster on a dual-stack node.
+	ipv4Addr := net.ParseIP("192.168.50.20")
+	ipv6Addr := net.ParseIP("2001:db8:0:1::97")
 
 	It("keeps both families when --single-stack is not set (unchanged behavior)", func() {
-		f := &fakeDiscoverer{defaultResults: [][]net.IP{{mgmtIPv4, nodeIPv6}}}
-		chosen, _, err := getSuitableIPsInternal(true, nil, true, ovn, false, false, f.discoverer())
+		f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv4Addr, ipv6Addr}}}
+		chosen, _, err := getSuitableIPsInternal(true, nil, true, ovn, stackUnknown, f.discoverer())
 
 		Expect(err).ToNot(HaveOccurred())
-		Expect(chosen).To(Equal([]net.IP{mgmtIPv4, nodeIPv6}))
+		Expect(chosen).To(Equal([]net.IP{ipv4Addr, ipv6Addr}))
 	})
 
 	It("drops IPv4 addresses on an IPv6 single-stack cluster", func() {
-		f := &fakeDiscoverer{defaultResults: [][]net.IP{{mgmtIPv4, nodeIPv6}}}
-		chosen, matchesVips, err := getSuitableIPsInternal(true, nil, true, ovn, false, true, f.discoverer())
+		f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv4Addr, ipv6Addr}}}
+		chosen, matchesVips, err := getSuitableIPsInternal(true, nil, true, ovn, stackSingle, f.discoverer())
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(matchesVips).To(BeFalse())
-		Expect(chosen).To(Equal([]net.IP{nodeIPv6}))
+		Expect(chosen).To(Equal([]net.IP{ipv6Addr}))
 		Expect(f.sleeps).To(BeEmpty())
 	})
 
 	It("drops IPv6 addresses on an IPv4 single-stack cluster", func() {
 		ipv4 := net.ParseIP("10.0.0.5")
-		f := &fakeDiscoverer{defaultResults: [][]net.IP{{nodeIPv6, ipv4}}}
-		chosen, _, err := getSuitableIPsInternal(true, nil, false, ovn, false, true, f.discoverer())
+		f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv6Addr, ipv4}}}
+		chosen, _, err := getSuitableIPsInternal(true, nil, false, ovn, stackSingle, f.discoverer())
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(chosen).To(Equal([]net.IP{ipv4}))
 	})
 
 	It("waits for an address of the cluster family instead of choosing the other family", func() {
-		// The IPv4 DHCP lease is up before the static IPv6 address.
-		f := &fakeDiscoverer{defaultResults: [][]net.IP{{mgmtIPv4}, {mgmtIPv4}, {mgmtIPv4, nodeIPv6}}}
-		chosen, _, err := getSuitableIPsInternal(true, nil, true, ovn, false, true, f.discoverer())
+		f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv4Addr}, {ipv4Addr}, {ipv4Addr, ipv6Addr}}}
+		chosen, _, err := getSuitableIPsInternal(true, nil, true, ovn, stackSingle, f.discoverer())
 
 		Expect(err).ToNot(HaveOccurred())
-		Expect(chosen).To(Equal([]net.IP{nodeIPv6}))
+		Expect(chosen).To(Equal([]net.IP{ipv6Addr}))
 		Expect(f.defaultCalls).To(Equal(3))
 		Expect(f.sleeps).To(HaveLen(2))
 	})
 
 	It("fails without retry when only the other family is available", func() {
-		f := &fakeDiscoverer{defaultResults: [][]net.IP{{mgmtIPv4}}}
-		_, _, err := getSuitableIPsInternal(false, nil, true, ovn, false, true, f.discoverer())
+		f := &fakeDiscoverer{defaultResults: [][]net.IP{{ipv4Addr}}}
+		_, _, err := getSuitableIPsInternal(false, nil, true, ovn, stackSingle, f.discoverer())
 
 		Expect(err).To(HaveOccurred())
 	})
 
 	It("filters the VIP/hint routing path as well", func() {
 		vips := []net.IP{net.ParseIP("2001:db8:0:1::")}
-		f := &fakeDiscoverer{routingResults: [][]net.IP{{mgmtIPv4, nodeIPv6}}}
-		chosen, matchesVips, err := getSuitableIPsInternal(true, vips, true, ovn, false, true, f.discoverer())
+		f := &fakeDiscoverer{routingResults: [][]net.IP{{ipv4Addr, ipv6Addr}}}
+		chosen, matchesVips, err := getSuitableIPsInternal(true, vips, true, ovn, stackSingle, f.discoverer())
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(matchesVips).To(BeTrue())
-		Expect(chosen).To(Equal([]net.IP{nodeIPv6}))
+		Expect(chosen).To(Equal([]net.IP{ipv6Addr}))
 		Expect(f.defaultCalls).To(Equal(0))
 	})
 
 	It("falls back to the default-route path when the hint only matches the other family", func() {
 		vips := []net.IP{net.ParseIP("192.168.50.0")}
 		f := &fakeDiscoverer{
-			routingResults: [][]net.IP{{mgmtIPv4}},
-			defaultResults: [][]net.IP{{mgmtIPv4, nodeIPv6}},
+			routingResults: [][]net.IP{{ipv4Addr}},
+			defaultResults: [][]net.IP{{ipv4Addr, ipv6Addr}},
 		}
-		chosen, matchesVips, err := getSuitableIPsInternal(true, vips, true, ovn, false, true, f.discoverer())
+		chosen, matchesVips, err := getSuitableIPsInternal(true, vips, true, ovn, stackSingle, f.discoverer())
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(matchesVips).To(BeFalse())
-		Expect(chosen).To(Equal([]net.IP{nodeIPv6}))
+		Expect(chosen).To(Equal([]net.IP{ipv6Addr}))
 	})
+})
 
+var _ = Describe("stackFromFlags", func() {
+	It("returns stackUnknown when no stack flag is set", func() {
+		Expect(stackFromFlags(false, false)).To(Equal(stackUnknown))
+	})
+	It("returns stackDual for --dual-stack", func() {
+		Expect(stackFromFlags(true, false)).To(Equal(stackDual))
+	})
+	It("returns stackSingle for --single-stack", func() {
+		Expect(stackFromFlags(false, true)).To(Equal(stackSingle))
+	})
 	It("rejects --single-stack together with --dual-stack", func() {
-		f := &fakeDiscoverer{defaultResults: [][]net.IP{{mgmtIPv4, nodeIPv6}}}
-		_, _, err := getSuitableIPsInternal(true, nil, true, ovn, true, true, f.discoverer())
-
+		_, err := stackFromFlags(true, true)
 		Expect(err).To(HaveOccurred())
-		Expect(f.defaultCalls).To(Equal(0))
 	})
 })
 

@@ -629,6 +629,28 @@ var _ = Describe("addresses", func() {
 	})
 })
 
+var _ = Describe("single-stack cluster on a dual-stack node", func() {
+	addrMap := func(af AddressFilter) (map[netlink.Link][]netlink.Addr, error) {
+		addrs := make(map[netlink.Link][]netlink.Addr)
+		maybeAddAddress(addrs, af, eth0, "192.0.2.20/24", false, "")
+		maybeAddAddress(addrs, af, eth1, "2001:db8:0:1::97/128", false, "")
+		return addrs, nil
+	}
+	routeMap := func(rf RouteFilter) (map[int][]netlink.Route, error) {
+		routes := make(map[int][]netlink.Route)
+		maybeAddRoute(routes, rf, eth0, "", false, 100, "192.0.2.1")
+		maybeAddRoute(routes, rf, eth1, "", false, 100, "fe80::1")
+		return routes, nil
+	}
+
+	It("finds both families when each interface has a default route of the same metric", func() {
+		addrs, err := addressesDefaultInternal(true, ValidNodeAddress, addrMap, routeMap)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(addrs).To(Equal([]net.IP{net.ParseIP("192.0.2.20"), net.ParseIP("2001:db8:0:1::97")}))
+		Expect(FilterIPFamilies(addrs, false, true)).To(Equal([]net.IP{net.ParseIP("2001:db8:0:1::97")}))
+	})
+})
+
 func Test(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Addresses tests")

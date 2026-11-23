@@ -214,3 +214,25 @@ var _ = Describe("ConvertIpsToStrings", func() {
 		Expect(res[1]).To(Equal(sampleV6))
 	})
 })
+
+var _ = Describe("FilterIPFamilies", func() {
+	v4 := net.ParseIP(sampleV4)
+	v6 := net.ParseIP(sampleV6)
+	mixed := []net.IP{v4, v6, net.ParseIP("10.0.0.1"), net.ParseIP("fd00::6")}
+
+	It("keeps only IPv4 addresses", func() {
+		Expect(FilterIPFamilies(mixed, true, false)).To(Equal([]net.IP{v4, net.ParseIP("10.0.0.1")}))
+	})
+	It("keeps only IPv6 addresses", func() {
+		Expect(FilterIPFamilies(mixed, false, true)).To(Equal([]net.IP{v6, net.ParseIP("fd00::6")}))
+	})
+	It("keeps both families in their original order", func() {
+		Expect(FilterIPFamilies(mixed, true, true)).To(Equal(mixed))
+	})
+	It("returns an empty list when no family is requested", func() {
+		Expect(FilterIPFamilies(mixed, false, false)).To(BeEmpty())
+	})
+	It("returns an empty list for empty input", func() {
+		Expect(FilterIPFamilies(nil, true, true)).To(BeEmpty())
+	})
+})
